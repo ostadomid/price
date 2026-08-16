@@ -1,0 +1,17 @@
+{
+  "printer_price": 35000000,
+  "ink_price": 13000000,
+  "shipment_cost": [
+    {
+      "Almas": 5500
+    },
+    {
+      "Hamrang": 3500
+    },
+    {
+      "Inventory": 1000
+    }
+  ],
+  "total_prints": 25000,
+  "profit_margin": 0.25
+}
