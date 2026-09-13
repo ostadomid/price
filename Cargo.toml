@@ -23,7 +23,9 @@ tokio = { version = "1", features = ["full"] }
 chrono = "0.4.45"
 parsidate = {version = "1", features = ["serde"]}
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-
 dotenvy = "0.15"
+rust_xlsxwriter = "0.99.0"
+open = "5.4.4"
+tempfile = "3.27.0"
 # ratatui = "0.30.2"
 # diesel = { version = "2.2.0", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }

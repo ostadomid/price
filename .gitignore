@@ -1,2 +1,6 @@
 /target
 /scratch
+/old-1
+/old-2
+*.rar
+*-old.*

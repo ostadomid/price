@@ -1,4 +1,7 @@
 #![allow(dead_code, unused)]
+mod charts;
+mod expense;
+mod report;
 mod sql;
 use std::{
     collections::HashMap,
@@ -15,12 +18,38 @@ use colored::*;
 use comfy_table::{Cell, Color, Row, Table};
 use dialoguer::{Confirm, FuzzySelect, Input, Select, console::Style, theme::ColorfulTheme};
 use format_num::format_num;
-use num_format::{Buffer, Format, Locale::{self, shi}, ToFormattedString};
+use num_format::{
+    Buffer, Format,
+    Locale::{self, shi},
+    ToFormattedString,
+};
+use parsidate::ParsiDate;
 use rusqlite::{Connection, params};
+use rust_xlsxwriter::workbook::Workbook;
 use serde::{Deserialize, Serialize};
+use tempfile::{Builder, tempfile};
+
+use crate::{
+    expense::Expense,
+    report::InOutReport,
+    sql::{CREATE_EXPENSE_TABLE, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT},
+};
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
-
+const MONTHS:[&str;12]=[
+        "Farvardin",
+        "Ordibehesht",
+        "Khordad",
+        "Tir",
+        "Mordad",
+        "Shahrivar",
+        "Mehr",
+        "Aban",
+        "Azar",
+        "Dey",
+        "Bahman",
+        "Esfand"
+    ];
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 enum Shipment {
     Almas(u32),
@@ -86,7 +115,7 @@ struct Order {
     id: Option<u32>,
     card_id: String,
     order_count: u32,
-    card_raw_price:u32,
+    card_raw_price: u32,
     card_cost: f64,
     card_profit: f64,
     design_cost: u32,
@@ -99,7 +128,7 @@ impl Order {
         config: &Config,
         theme: &ColorfulTheme,
         prices: &HashMap<String, Vec<u32>>,
-        raw_prices:&HashMap<String, u32>,
+        raw_prices: &HashMap<String, u32>,
     ) -> Self {
         let cost_printer_usage = config.printer_price / config.total_prints;
         let cost_ink = config.ink_price / config.total_prints;
@@ -115,6 +144,7 @@ impl Order {
         let card_raw_price = *raw_prices.get(card_id).unwrap_or(&0);
         let card_prices = prices.get(card_id).unwrap();
         let card_final_price = card_prices[Select::with_theme(theme)
+            .with_prompt("Card Price")
             .items(
                 card_prices
                     .iter()
@@ -126,17 +156,43 @@ impl Order {
             .unwrap()];
         let order_count = Input::<u32>::with_theme(theme)
             .with_prompt("Order Count")
+            .default(1)
             .interact_text()
             .unwrap();
-        let design_cost = Input::<u32>::with_theme(theme)
+        let mut d_cost = vec![];
+        d_cost.push(if order_count <= 200 {
+            400_000
+        } else {
+            order_count * 2_000
+        });
+        d_cost.append(&mut vec![order_count * 2_000, 0]);
+
+        let mut design_cost = d_cost[Select::with_theme(theme)
             .with_prompt("Design Cost")
-            .default(if order_count < 200 {
-                400_000
-            } else {
-                order_count * 2000
-            })
-            .interact_text()
-            .unwrap_or_default();
+            .items(vec![
+                format!("Normal - {}", format_num!(",.0f", d_cost[0])).as_str(),
+                format!("Re-Order {}", format_num!(",.0f", d_cost[1])).as_str(),
+                "Others",
+            ])
+            .default(0)
+            .interact()
+            .unwrap()];
+        if design_cost == 0 {
+            design_cost = Input::<u32>::with_theme(theme)
+                .with_prompt("Custom Design Cost")
+                .default(0)
+                .interact()
+                .unwrap_or_default()
+        }
+        // let design_cost = Input::<u32>::with_theme(theme)
+        //     .with_prompt("Design Cost")
+        //     .default(if order_count < 200 {
+        //         400_000
+        //     } else {
+        //         order_count * 2000
+        //     })
+        //     .interact_text()
+        //     .unwrap_or_default();
         let discount = Input::<u32>::with_theme(theme)
             .with_prompt("Discount")
             .default(0)
@@ -170,16 +226,20 @@ impl Order {
 impl Into<comfy_table::Row> for &Order {
     fn into(self) -> comfy_table::Row {
         comfy_table::Row::from(vec![
-            self.id.unwrap_or_default().to_string(),
-            self.card_id.to_string(),
-            self.order_count.to_string(),
-            self.card_raw_price.to_string(),
-            self.card_cost.to_string(),
-            self.card_profit.to_string(),
-            self.design_cost.to_string(),
-            self.discount.to_string(),
-            self.customer_paid.to_string(),
-            self.ordered_at.unwrap_or_default().to_string(),
+            Cell::from(self.id.unwrap_or_default().to_string()),
+            Cell::from(self.card_id.to_string()),
+            Cell::from(self.order_count.to_string()),
+            Cell::from(format_num!(",.0f", self.card_raw_price)),
+            Cell::from(format_num!(",.0f", self.card_cost)),
+            Cell::from(format_num!(",.0f", self.card_profit)).fg(Color::Cyan),
+            Cell::from(format_num!(",.0f", self.design_cost)),
+            Cell::from(format_num!(",.0f", self.discount)),
+            Cell::from(format_num!(",.0f", self.customer_paid)),
+            Cell::from(
+                parsidate::ParsiDate::from_gregorian(self.ordered_at.unwrap_or_default())
+                    .unwrap()
+                    .to_string(),
+            ),
         ])
     }
 }
@@ -216,10 +276,15 @@ fn calculate_final_price(config: &Config, theme: &ColorfulTheme) {
                 _ => None,
             })
             .unwrap_or_default();
+        if cost_shipment == 0 {
+            return;
+        }
+        let cost_shipment = Input::<u32>::with_theme(theme)
+            .with_prompt("Shipment Price")
+            .default(cost_shipment)
+            .interact()
+            .unwrap();
         'inner: loop {
-            if cost_shipment == 0 {
-                return;
-            }
             let card_raw_price = Input::<u32>::with_theme(theme)
                 .with_prompt("Card Raw Price")
                 .interact_text()
@@ -263,7 +328,7 @@ fn read_prices() -> std::io::Result<HashMap<String, Vec<u32>>> {
     Ok(hm)
 }
 fn read_raw_prices() -> std::io::Result<HashMap<String, u32>> {
-    let file = File::open("./raw-prices.json")?;
+    let file = File::open("./raw-prices-2.json")?;
     let mut buffer = BufReader::new(file);
     let hm: HashMap<String, u32> = serde_json::from_reader(buffer)?;
     Ok(hm)
@@ -290,10 +355,10 @@ fn get_prices_from_raw_prices(config: &Config) -> HashMap<String, Vec<u32>> {
                 .shipment_cost
                 .iter()
                 .find(|sh| sh.prefix().as_str() == prefix);
-                
-            let shipment_price = if let Some(sh) = shipment{
+
+            let shipment_price = if let Some(sh) = shipment {
                 sh.value()
-            } else{
+            } else {
                 shipment_for_inventory
             };
             let cost_printer_usage = config.printer_price / config.total_prints;
@@ -324,7 +389,9 @@ fn get_prices_from_raw_prices(config: &Config) -> HashMap<String, Vec<u32>> {
 fn init_db() -> Result<(), Box<dyn Error>> {
     let c = Connection::open("./databse.sqlite").expect("Cant find/create database.sqlite");
     c.execute(sql::CREATE_ORDER_TABLE, [])
-        .expect("Cant create table");
+        .expect("Cant create orders table");
+    c.execute(CREATE_EXPENSE_TABLE, [])
+        .expect("Cant create expenses table ");
     let _ = DB_CONNECTION.set(Mutex::new(c));
     Ok(())
 }
@@ -334,7 +401,16 @@ fn get_db_connection() -> &'static Mutex<Connection> {
 fn create_ui_table_from_all_orders(orders: &Vec<Order>) -> Table {
     let mut table = Table::new();
     table.set_header(Row::from([
-        "Id", "Code", "Count", "Raw Price","Cost", "Profit", "Design", "Discount", "Paid", "Date",
+        "Id",
+        "Code",
+        "Count",
+        "Raw Price",
+        "Cost",
+        "Profit",
+        "Design",
+        "Discount",
+        "Paid",
+        "Date",
     ]));
     for order in orders {
         table.add_row(order);
@@ -469,7 +545,7 @@ fn generate_dates() -> Vec<String> {
     let current_year = parsidate::ParsiDate::today().unwrap().year();
     for year in current_year..current_year + 2 {
         for month in 1..=12 {
-            for day in 1..31 {
+            for day in 1..=31 {
                 if month >= 7 && day == 31 {
                     continue;
                 }
@@ -489,31 +565,130 @@ fn get_parsi_date(theme: &ColorfulTheme) -> parsidate::ParsiDate {
         .unwrap();
     parsidate::ParsiDate::parse(items[idx].as_str(), "%Y/%m/%d").unwrap()
 }
+
 fn show_orders(theme: &ColorfulTheme) {
+    match Select::with_theme(theme)
+        .with_prompt("Select")
+        .items(["Current Month", "Range","Specified Card"])
+        .default(0)
+        .interact()
+        .unwrap()
+    {
+        0 => {
+            let start = parsidate::ParsiDate::today()
+                .unwrap()
+                .first_day_of_month()
+                .to_gregorian()
+                .unwrap();
+            let end = parsidate::ParsiDate::today()
+                .unwrap()
+                .last_day_of_month()
+                .to_gregorian()
+                .unwrap();
+            show_orders_table(start, end);
+        }
+        1 => {
+            let (start, end) = (
+                get_parsi_date(theme).to_gregorian().unwrap(),
+                get_parsi_date(theme).to_gregorian().unwrap(),
+            );
+            show_orders_table(start, end);
+        }
+        2=>{
+            show_orders_for_specific_card(theme);
+        },
+        _ => unimplemented!(),
+    }
+}
+fn show_orders_for_specific_card(theme:&ColorfulTheme){
+    
+}
+fn show_orders_table(start: NaiveDate, end: NaiveDate) {
+    println!("{}-{}", start, end);
     let db = get_db_connection().lock().unwrap();
-    let mut stm = db.prepare("SELECT * from orders").unwrap();
-    let mut rows = stm
-        .query_map([], |r| {
+    let mut stm = db
+        .prepare(
+            "SELECT * from orders where ordered_at>=?1 and ordered_at<=?2 order by ordered_at ",
+        )
+        .unwrap();
+    let mut orders = stm
+        .query_map([start.to_string(), end.to_string()], |r| {
             let mut order = Order::default();
             order.id = Some(r.get_unwrap(0));
             order.card_id = r.get_unwrap(1);
             order.order_count = r.get_unwrap(2);
-            order.card_cost = r.get_unwrap(3);
-            order.card_profit = r.get_unwrap(4);
-            order.design_cost = r.get_unwrap(5);
-            order.discount = r.get_unwrap(6);
-            order.customer_paid = r.get_unwrap(7);
+            order.card_raw_price = r.get_unwrap(3);
+            order.card_cost = r.get_unwrap(4);
+            order.card_profit = r.get_unwrap(5);
+            order.design_cost = r.get_unwrap(6);
+            order.discount = r.get_unwrap(7);
+            order.customer_paid = r.get_unwrap(8);
             order.ordered_at =
-                NaiveDate::parse_from_str(r.get_unwrap::<usize, String>(8).as_str(), "").ok();
+                NaiveDate::parse_from_str(r.get_unwrap::<usize, String>(9).as_str(), "%Y-%m-%d")
+                    .ok();
             Ok(order)
         })
         .unwrap();
-    let orders: Vec<Order> = rows.map(|e| e.unwrap()).collect();
-    let table = create_ui_table_from_all_orders(&orders);
-    println!("{table}");
+    //let orders: Vec<Order> = orders.map(|e| e.unwrap()).collect();
+    //let table = create_ui_table_from_all_orders(&orders);
+    let mut table = Table::new();
+
+    let mut total_profit = 0u32;
+    let mut total_initial = 0u32;
+    let mut total_paid = 0f64;
+    let mut card_portion_of_initial = 0u32;
+
+    for order in orders {
+        if let Ok(order) = order {
+            total_initial += order.order_count * order.card_cost as u32;
+            total_profit +=
+                order.order_count * order.card_profit as u32 + order.design_cost - order.discount;
+            total_paid += order.customer_paid;
+            card_portion_of_initial += order.order_count * order.card_raw_price;
+            table.add_row(&order);
+        }
+    }
+    println!("{}", table);
+    println!(
+        "{:>32} {}",
+        "Total Initial:".yellow(),
+        format_num!(",.0f", total_initial).green()
+    );
+    println!(
+        "{:>32} {}",
+        "Total  Profit:".yellow(),
+        format_num!(",.0f", total_profit).green()
+    );
+    println!(
+        "{:>32} {}",
+        "Total  Paid:".yellow(),
+        format_num!(",.0f", total_paid).blue()
+    );
+    println!("{}", "-".repeat(44));
+    println!(
+        "{:>32} {}",
+        "Initial        -> Card Portion:".yellow(),
+        format_num!(",.0f", card_portion_of_initial).green()
+    );
+    println!(
+        "{:>32} {}\n\n",
+        "Initial -> Ink/Printer Portion:".yellow(),
+        format_num!(",.0f", total_initial - card_portion_of_initial).green()
+    );
+
+    // println!(
+    //     "{:>16} {}\n\n",
+    //     "Both:".yellow(),
+    //     format_num!(",.0f", total_paid).green()
+    // );
 }
-fn add_new_order(config: &Config, theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>, raw_prices: &HashMap<String,u32>) {
-    let new_order = Order::new_from_user(config, theme, prices,raw_prices);
+fn add_new_order(
+    config: &Config,
+    theme: &ColorfulTheme,
+    prices: &HashMap<String, Vec<u32>>,
+    raw_prices: &HashMap<String, u32>,
+) {
+    let new_order = Order::new_from_user(config, theme, prices, raw_prices);
     println!("{}", create_ui_table_from_order(&new_order));
     if !Confirm::with_theme(theme)
         .with_prompt("Add this order?")
@@ -547,7 +722,12 @@ fn add_new_order(config: &Config, theme: &ColorfulTheme, prices: &HashMap<String
         }
     }
 }
-fn manage_orders(config: &Config, theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>, raw_prices: &HashMap<String,u32>) {
+fn manage_orders(
+    config: &Config,
+    theme: &ColorfulTheme,
+    prices: &HashMap<String, Vec<u32>>,
+    raw_prices: &HashMap<String, u32>,
+) {
     loop {
         match Select::with_theme(theme)
             .items(["Show Orders", "Add New Order", "Back"])
@@ -559,7 +739,7 @@ fn manage_orders(config: &Config, theme: &ColorfulTheme, prices: &HashMap<String
                 show_orders(theme);
             }
             1 => {
-                add_new_order(config, theme, prices,raw_prices);
+                add_new_order(config, theme, prices, raw_prices);
             }
             _ => {
                 break;
@@ -567,6 +747,121 @@ fn manage_orders(config: &Config, theme: &ColorfulTheme, prices: &HashMap<String
         }
     }
 }
+fn show_expenses(theme: &ColorfulTheme) {
+    match Select::with_theme(theme)
+        .with_prompt("Select")
+        .items(["Current Month", "Range"])
+        .default(0)
+        .interact()
+        .unwrap()
+    {
+        0 => {
+            let start = parsidate::ParsiDate::today()
+                .unwrap()
+                .first_day_of_month()
+                .to_gregorian()
+                .unwrap();
+            let end = parsidate::ParsiDate::today()
+                .unwrap()
+                .last_day_of_month()
+                .to_gregorian()
+                .unwrap();
+            show_expenses_table(start, end);
+        }
+        1 => {
+            let (start, end) = (
+                get_parsi_date(theme).to_gregorian().unwrap(),
+                get_parsi_date(theme).to_gregorian().unwrap(),
+            );
+            show_expenses_table(start, end);
+        }
+        _ => unimplemented!(),
+    }
+}
+fn show_expenses_table(start: NaiveDate, end: NaiveDate) {
+    let db = get_db_connection().lock().unwrap();
+    let mut stm = db
+        .prepare("Select * from expenses where issued_at>=?1 and issued_at<=?2")
+        .unwrap();
+    let expenses = stm
+        .query_map([start.to_string(), end.to_string()], |row| {
+            Ok(Expense {
+                id: Some(row.get_unwrap(0)),
+                card: row.get_unwrap(1),
+                ink: row.get_unwrap(2),
+                printer: row.get_unwrap(3),
+                maintanance: row.get_unwrap(4),
+                description: row.get_unwrap(5),
+                issued_at: NaiveDate::parse_from_str(
+                    &row.get_unwrap::<usize, String>(6),
+                    "%Y-%m-%d",
+                )
+                .unwrap(),
+            })
+        })
+        .unwrap();
+    let mut table = Table::new();
+    table.set_header(Row::from(vec![
+        "Id",
+        "Card",
+        "Ink",
+        "Printer",
+        "Maintanance",
+        "Desc",
+        "Date",
+    ]));
+    // let mut total_expense = 0u32;
+    for expense in expenses {
+        if let Ok(expense) = expense {
+            // total_expense += expense.cost;
+            table.add_row(expense);
+        }
+    }
+    println!("{}", table);
+    // println!(
+    //     "{} {}\n\n",
+    //     "Total Expense :".yellow(),
+    //     format_num!(",.0f", total_expense).red()
+    // );
+}
+fn add_new_expense(theme: &ColorfulTheme) {
+    let expense = Expense::new_from_user(theme);
+    let db = get_db_connection().lock().unwrap();
+    db.execute(
+        INSERT_EXPENSE,
+        params![
+            expense.card,
+            expense.ink,
+            expense.printer,
+            expense.maintanance,
+            expense.description,
+            expense.issued_at.to_string(),
+        ],
+    )
+    .expect("Cant add new expense");
+    println!("{}", "New expense added".green());
+}
+fn manage_expenses(theme: &ColorfulTheme) {
+    loop {
+        match Select::with_theme(theme)
+            .items(["Show Expenses", "Add New Expense", "Back"])
+            .default(1)
+            .interact()
+            .unwrap()
+        {
+            0 => {
+                show_expenses(theme);
+            }
+            1 => {
+                add_new_expense(theme);
+            }
+            _ => {
+                break;
+            }
+        }
+    }
+}
+
 fn compare_prices(
     theme: &ColorfulTheme,
     prices: &HashMap<String, Vec<u32>>,
@@ -577,12 +872,73 @@ fn compare_prices(
         .items(&card_ids)
         .max_length(7)
         .interact()
-        .unwrap()].as_str();
+        .unwrap()]
+    .as_str();
     println!(
         "Manual: {:?}  Auto: {:?}",
         prices.get(card_id).unwrap(),
         auto_prices.get(card_id).unwrap()
     );
+}
+fn get_current_month_tuple()->(String, ParsiDate,ParsiDate){
+    let today = parsidate::ParsiDate::today().unwrap();
+    let start = today.first_day_of_month();
+    let end = today.last_day_of_month();
+    (MONTHS[today.month() as usize].to_owned(), start,end)
+}
+fn get_prev_month_tuple()->(String, ParsiDate,ParsiDate){
+    let today = parsidate::ParsiDate::today().unwrap();
+    let today_minus_one_month = today.sub_months(1).unwrap();
+    let start = today_minus_one_month.first_day_of_month();
+    let end = today_minus_one_month.last_day_of_month();
+    (MONTHS[today.month() as usize].to_owned(), start,end)
+}
+fn manage_report(theme:&ColorfulTheme){
+    let  (current_month,cm_start,cm_end) = get_current_month_tuple();
+    let  (prev_month,pm_start,pm_end) = get_prev_month_tuple();
+   
+    // match Select::with_theme(theme).with_prompt("Choose One").items(vec!["From Beginning",""]);
+}
+fn report(theme: &ColorfulTheme) {
+    let db = get_db_connection().lock().unwrap();
+    let mut stm = db.prepare(ORDERS_EXPENSE_REPORT).unwrap();
+    let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+    let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+    let mut report: Vec<(u32, u32, u32, u32)> = Vec::new();
+    let rows = stm
+        .query_map([&start, &end], |row| {
+            Ok(InOutReport::new(
+                row.get_unwrap::<usize, String>(0),
+                row.get_unwrap::<usize, u32>(1),
+                row.get_unwrap::<usize, u32>(2),
+                row.get_unwrap::<usize, u32>(3),
+                row.get_unwrap::<usize, u32>(4),
+            ))
+        })
+        .unwrap();
+    let mut table = Table::new();
+    table.set_header(vec!["", "Card", "Ink/Printer", "Profit", "Balance"]);
+    let rows = rows.filter_map(|e| e.ok()).collect::<Vec<_>>();
+    let summary = InOutReport::summary(&rows[0], &rows[1]);
+    for row in rows {
+        table.add_row(row);
+    }
+    table.add_row(summary);
+    println!("\n{}\n", table);
+}
+fn create_auto_price_excel(config:&Config){
+    let tmp = Builder::new().prefix("auto_price_").suffix(".xlsx").tempfile().expect("Can not create Excel temp file");
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    let auto_prices = get_prices_from_raw_prices(config);
+    for (row, (card_id,prices)) in auto_prices.iter().enumerate(){
+        worksheet.write(row as u32, 0, card_id);
+        worksheet.write(row as u32, 1, prices[0]);
+        worksheet.write(row as u32, 2, prices[1]);
+    }
+    workbook.save(tmp.path());
+    let (_,p) =tmp.keep().unwrap();
+    open::that(&p);
 }
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -595,19 +951,32 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut prices = read_prices()?;
     let mut raw_prices = read_raw_prices()?;
     let mut auto_prices = get_prices_from_raw_prices(&config);
-
     loop {
         match Select::with_theme(&theme)
             .with_prompt("Choose")
-            .items(["Final Price", "Profit", "Orders", "Compare Prices", "Quit"])
+            .items([
+                "Price Calculator",
+                "Profit Calculator",
+                "Orders",
+                "Expenses",
+                "Report",
+                "Compare Prices",
+                "Auto Price Report",
+                "Quit",
+            ])
             .default(0)
             .interact()
             .unwrap()
         {
             0 => calculate_final_price(&config, &theme),
             1 => calculate_profit2(&config, &theme, &prices),
-            2 => manage_orders(&config, &theme, &prices,&raw_prices),
-            3 => compare_prices(&theme, &prices, &auto_prices),
+            2 => manage_orders(&config, &theme, &prices, &raw_prices),
+            3 => manage_expenses(&theme),
+            4 => report(&theme),
+            5 => compare_prices(&theme, &prices, &auto_prices),
+            6=>{
+                create_auto_price_excel(&config);
+            },
             _ => break,
         }
     }
