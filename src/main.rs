@@ -876,18 +876,33 @@ fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
             .interact()
             .unwrap()]
         .as_str();
-        if let Some(&[lower_price, higher_price, ..]) = prices.get(card_id).map(Vec::as_slice) {
-            let mut table = Table::new();
-            table.set_header(["Inventory","Order"]);
-            table.add_row([
-                Cell::from(format_num!(",.0f", lower_price)).fg(Color::Green),
-                Cell::from(format_num!(",.0f", higher_price)).fg(Color::Magenta),
-            ]);
-            println!("{table}");
-        } else {
-            println!("Can not show the result. Maybe there is no row in Price lists!");
+        match prices.get(card_id).map(Vec::as_slice) {
+            Some(&[lower_price, higher_price, ..]) => {
+                let mut table = Table::new();
+                table.set_header(["Inventory", "Order"]);
+                table.add_row([
+                    Cell::from(format_num!(",.0f", lower_price)).fg(Color::Green),
+                    Cell::from(format_num!(",.0f", higher_price)).fg(Color::Magenta),
+                ]);
+                println!("{table}");
+            }
+            Some(&[lower_price]) => {
+                let mut table = Table::new();
+                table.set_header(["Inventory"]);
+                table.add_row([Cell::from(format_num!(",.0f", lower_price)).fg(Color::Green)]);
+                println!("{table}");
+            }
+            Some(_) => {}
+            None => {
+                println!("Can not show the result. Maybe there is no row in Price lists!");
+            }
         }
-        if !Confirm::with_theme(theme).with_prompt("Continue?").default(true).interact().unwrap(){
+        if !Confirm::with_theme(theme)
+            .with_prompt("Continue?")
+            .default(true)
+            .interact()
+            .unwrap()
+        {
             break;
         }
     }
@@ -967,6 +982,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut raw_prices = read_raw_prices()?;
     let mut prices = get_prices_from_raw_prices(&config);
+
     loop {
         match Select::with_theme(&theme)
             .with_prompt("Choose")
