@@ -36,20 +36,20 @@ use crate::{
 };
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
-const MONTHS:[&str;12]=[
-        "Farvardin",
-        "Ordibehesht",
-        "Khordad",
-        "Tir",
-        "Mordad",
-        "Shahrivar",
-        "Mehr",
-        "Aban",
-        "Azar",
-        "Dey",
-        "Bahman",
-        "Esfand"
-    ];
+const MONTHS: [&str; 12] = [
+    "Farvardin",
+    "Ordibehesht",
+    "Khordad",
+    "Tir",
+    "Mordad",
+    "Shahrivar",
+    "Mehr",
+    "Aban",
+    "Azar",
+    "Dey",
+    "Bahman",
+    "Esfand",
+];
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 enum Shipment {
     Almas(u32),
@@ -328,7 +328,7 @@ fn read_prices() -> std::io::Result<HashMap<String, Vec<u32>>> {
     Ok(hm)
 }
 fn read_raw_prices() -> std::io::Result<HashMap<String, u32>> {
-    let file = File::open("./raw-prices-2.json")?;
+    let file = File::open("./raw-prices.json")?;
     let mut buffer = BufReader::new(file);
     let hm: HashMap<String, u32> = serde_json::from_reader(buffer)?;
     Ok(hm)
@@ -381,7 +381,14 @@ fn get_prices_from_raw_prices(config: &Config) -> HashMap<String, Vec<u32>> {
                 higher_price / 100 * 100 + 100
             };
 
-            (card_code.clone(), vec![lower_price, higher_price])
+            (
+                card_code.clone(),
+                if lower_price == higher_price {
+                    vec![lower_price]
+                } else {
+                    vec![lower_price, higher_price]
+                },
+            )
         })
         .collect::<HashMap<String, Vec<u32>>>();
     result
@@ -569,7 +576,7 @@ fn get_parsi_date(theme: &ColorfulTheme) -> parsidate::ParsiDate {
 fn show_orders(theme: &ColorfulTheme) {
     match Select::with_theme(theme)
         .with_prompt("Select")
-        .items(["Current Month", "Range","Specified Card"])
+        .items(["Current Month", "Range", "Specified Card"])
         .default(0)
         .interact()
         .unwrap()
@@ -594,15 +601,13 @@ fn show_orders(theme: &ColorfulTheme) {
             );
             show_orders_table(start, end);
         }
-        2=>{
+        2 => {
             show_orders_for_specific_card(theme);
-        },
+        }
         _ => unimplemented!(),
     }
 }
-fn show_orders_for_specific_card(theme:&ColorfulTheme){
-    
-}
+fn show_orders_for_specific_card(theme: &ColorfulTheme) {}
 fn show_orders_table(start: NaiveDate, end: NaiveDate) {
     println!("{}-{}", start, end);
     let db = get_db_connection().lock().unwrap();
@@ -862,41 +867,48 @@ fn manage_expenses(theme: &ColorfulTheme) {
     }
 }
 
-fn compare_prices(
-    theme: &ColorfulTheme,
-    prices: &HashMap<String, Vec<u32>>,
-    auto_prices: &HashMap<String, Vec<u32>>,
-) {
+fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
     let card_ids = prices.keys().cloned().collect::<Vec<String>>();
-    let card_id = card_ids[FuzzySelect::with_theme(theme)
-        .items(&card_ids)
-        .max_length(7)
-        .interact()
-        .unwrap()]
-    .as_str();
-    println!(
-        "Manual: {:?}  Auto: {:?}",
-        prices.get(card_id).unwrap(),
-        auto_prices.get(card_id).unwrap()
-    );
+    loop {
+        let card_id = card_ids[FuzzySelect::with_theme(theme)
+            .items(&card_ids)
+            .max_length(7)
+            .interact()
+            .unwrap()]
+        .as_str();
+        if let Some(&[lower_price, higher_price, ..]) = prices.get(card_id).map(Vec::as_slice) {
+            let mut table = Table::new();
+            table.set_header(["Inventory","Order"]);
+            table.add_row([
+                Cell::from(format_num!(",.0f", lower_price)).fg(Color::Green),
+                Cell::from(format_num!(",.0f", higher_price)).fg(Color::Magenta),
+            ]);
+            println!("{table}");
+        } else {
+            println!("Can not show the result. Maybe there is no row in Price lists!");
+        }
+        if !Confirm::with_theme(theme).with_prompt("Continue?").default(true).interact().unwrap(){
+            break;
+        }
+    }
 }
-fn get_current_month_tuple()->(String, ParsiDate,ParsiDate){
+fn get_current_month_tuple() -> (String, ParsiDate, ParsiDate) {
     let today = parsidate::ParsiDate::today().unwrap();
     let start = today.first_day_of_month();
     let end = today.last_day_of_month();
-    (MONTHS[today.month() as usize].to_owned(), start,end)
+    (MONTHS[today.month() as usize].to_owned(), start, end)
 }
-fn get_prev_month_tuple()->(String, ParsiDate,ParsiDate){
+fn get_prev_month_tuple() -> (String, ParsiDate, ParsiDate) {
     let today = parsidate::ParsiDate::today().unwrap();
     let today_minus_one_month = today.sub_months(1).unwrap();
     let start = today_minus_one_month.first_day_of_month();
     let end = today_minus_one_month.last_day_of_month();
-    (MONTHS[today.month() as usize].to_owned(), start,end)
+    (MONTHS[today.month() as usize].to_owned(), start, end)
 }
-fn manage_report(theme:&ColorfulTheme){
-    let  (current_month,cm_start,cm_end) = get_current_month_tuple();
-    let  (prev_month,pm_start,pm_end) = get_prev_month_tuple();
-   
+fn manage_report(theme: &ColorfulTheme) {
+    let (current_month, cm_start, cm_end) = get_current_month_tuple();
+    let (prev_month, pm_start, pm_end) = get_prev_month_tuple();
+
     // match Select::with_theme(theme).with_prompt("Choose One").items(vec!["From Beginning",""]);
 }
 fn report(theme: &ColorfulTheme) {
@@ -926,18 +938,22 @@ fn report(theme: &ColorfulTheme) {
     table.add_row(summary);
     println!("\n{}\n", table);
 }
-fn create_auto_price_excel(config:&Config){
-    let tmp = Builder::new().prefix("auto_price_").suffix(".xlsx").tempfile().expect("Can not create Excel temp file");
+fn create_auto_price_excel(config: &Config) {
+    let tmp = Builder::new()
+        .prefix("auto_price_")
+        .suffix(".xlsx")
+        .tempfile()
+        .expect("Can not create Excel temp file");
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
     let auto_prices = get_prices_from_raw_prices(config);
-    for (row, (card_id,prices)) in auto_prices.iter().enumerate(){
+    for (row, (card_id, prices)) in auto_prices.iter().enumerate() {
         worksheet.write(row as u32, 0, card_id);
         worksheet.write(row as u32, 1, prices[0]);
         worksheet.write(row as u32, 2, prices[1]);
     }
     workbook.save(tmp.path());
-    let (_,p) =tmp.keep().unwrap();
+    let (_, p) = tmp.keep().unwrap();
     open::that(&p);
 }
 #[tokio::main]
@@ -948,9 +964,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         active_item_style: Style::new().yellow(),
         ..Default::default()
     };
-    let mut prices = read_prices()?;
+
     let mut raw_prices = read_raw_prices()?;
-    let mut auto_prices = get_prices_from_raw_prices(&config);
+    let mut prices = get_prices_from_raw_prices(&config);
     loop {
         match Select::with_theme(&theme)
             .with_prompt("Choose")
@@ -960,7 +976,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 "Orders",
                 "Expenses",
                 "Report",
-                "Compare Prices",
+                "Show Card Price",
                 "Auto Price Report",
                 "Quit",
             ])
@@ -973,10 +989,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             2 => manage_orders(&config, &theme, &prices, &raw_prices),
             3 => manage_expenses(&theme),
             4 => report(&theme),
-            5 => compare_prices(&theme, &prices, &auto_prices),
-            6=>{
+            5 => show_card_pice(&theme, &prices),
+            6 => {
                 create_auto_price_excel(&config);
-            },
+            }
             _ => break,
         }
     }
