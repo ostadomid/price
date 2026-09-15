@@ -878,7 +878,7 @@ fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
         .as_str();
         if let Some(&[lower_price, higher_price, ..]) = prices.get(card_id).map(Vec::as_slice) {
             let mut table = Table::new();
-            table.set_header(["Inventory","Order"]);
+            table.set_header(["Inventory", "Order"]);
             table.add_row([
                 Cell::from(format_num!(",.0f", lower_price)).fg(Color::Green),
                 Cell::from(format_num!(",.0f", higher_price)).fg(Color::Magenta),
@@ -887,7 +887,12 @@ fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
         } else {
             println!("Can not show the result. Maybe there is no row in Price lists!");
         }
-        if !Confirm::with_theme(theme).with_prompt("Continue?").default(true).interact().unwrap(){
+        if !Confirm::with_theme(theme)
+            .with_prompt("Continue?")
+            .default(true)
+            .interact()
+            .unwrap()
+        {
             break;
         }
     }
@@ -914,29 +919,34 @@ fn manage_report(theme: &ColorfulTheme) {
 fn report(theme: &ColorfulTheme) {
     let db = get_db_connection().lock().unwrap();
     let mut stm = db.prepare(ORDERS_EXPENSE_REPORT).unwrap();
-    let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
-    let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
-    let mut report: Vec<(u32, u32, u32, u32)> = Vec::new();
-    let rows = stm
-        .query_map([&start, &end], |row| {
-            Ok(InOutReport::new(
-                row.get_unwrap::<usize, String>(0),
-                row.get_unwrap::<usize, u32>(1),
-                row.get_unwrap::<usize, u32>(2),
-                row.get_unwrap::<usize, u32>(3),
-                row.get_unwrap::<usize, u32>(4),
-            ))
-        })
-        .unwrap();
-    let mut table = Table::new();
-    table.set_header(vec!["", "Card", "Ink/Printer", "Profit", "Balance"]);
-    let rows = rows.filter_map(|e| e.ok()).collect::<Vec<_>>();
-    let summary = InOutReport::summary(&rows[0], &rows[1]);
-    for row in rows {
-        table.add_row(row);
+    loop {
+        let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+        let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+        let mut report: Vec<(u32, u32, u32, u32)> = Vec::new();
+        let rows = stm
+            .query_map([&start, &end], |row| {
+                Ok(InOutReport::new(
+                    row.get_unwrap::<usize, String>(0),
+                    row.get_unwrap::<usize, u32>(1),
+                    row.get_unwrap::<usize, u32>(2),
+                    row.get_unwrap::<usize, u32>(3),
+                    row.get_unwrap::<usize, u32>(4),
+                ))
+            })
+            .unwrap();
+        let mut table = Table::new();
+        table.set_header(vec!["", "Card", "Ink/Printer", "Profit", "Balance"]);
+        let rows = rows.filter_map(|e| e.ok()).collect::<Vec<_>>();
+        let summary = InOutReport::summary(&rows[0], &rows[1]);
+        for row in rows {
+            table.add_row(row);
+        }
+        table.add_row(summary);
+        println!("\n{}\n", table);
+        if !Confirm::with_theme(theme).with_prompt("Continue?").default(true).interact().unwrap(){
+            break;
+        }
     }
-    table.add_row(summary);
-    println!("\n{}\n", table);
 }
 fn create_auto_price_excel(config: &Config) {
     let tmp = Builder::new()

@@ -24,8 +24,8 @@ impl InOutReport {
     pub fn summary(income: &Self, outcome: &Self) -> Self {
         Self {
             title: "Summary".into(),
-            v1: income.v1 - outcome.v1,
-            v2: income.v2 - outcome.v2,
+            v1: income.v1.saturating_sub(outcome.v1) ,
+            v2: income.v2.saturating_sub(outcome.v2),
             v3: 0,
             v4: income.v4 - (income.v3 +outcome.v1 + outcome.v2), // موجودی فعلی حساب را منهای هزینه های کارت و جوهر و پرینتر و سود میکنیم تا مانده حساب پیدا شود
         }
