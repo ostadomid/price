@@ -32,7 +32,7 @@ use tempfile::{Builder, tempfile};
 use crate::{
     expense::Expense,
     report::InOutReport,
-    sql::{CREATE_EXPENSE_TABLE, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT},
+    sql::{CREATE_EXPENSE_TABLE, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT, SHOW_EXPENSES},
 };
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
@@ -785,36 +785,26 @@ fn show_expenses(theme: &ColorfulTheme) {
 }
 fn show_expenses_table(start: NaiveDate, end: NaiveDate) {
     let db = get_db_connection().lock().unwrap();
-    let mut stm = db
-        .prepare("Select * from expenses where issued_at>=?1 and issued_at<=?2")
-        .unwrap();
+    let mut stm = db.prepare(SHOW_EXPENSES).unwrap();
     let expenses = stm
         .query_map([start.to_string(), end.to_string()], |row| {
             Ok(Expense {
                 id: Some(row.get_unwrap(0)),
-                card: row.get_unwrap(1),
-                ink: row.get_unwrap(2),
-                printer: row.get_unwrap(3),
-                maintanance: row.get_unwrap(4),
-                description: row.get_unwrap(5),
+                kind: row.get_unwrap(1),
+                cost: row.get_unwrap(2),
+                description: row.get_unwrap(3),
                 issued_at: NaiveDate::parse_from_str(
-                    &row.get_unwrap::<usize, String>(6),
+                    &row.get_unwrap::<usize, String>(4),
                     "%Y-%m-%d",
                 )
                 .unwrap(),
             })
         })
         .unwrap();
+    
+    // dbg!(&expenses.collect::<Vec<_>>());
     let mut table = Table::new();
-    table.set_header(Row::from(vec![
-        "Id",
-        "Card",
-        "Ink",
-        "Printer",
-        "Maintanance",
-        "Desc",
-        "Date",
-    ]));
+    table.set_header(Row::from(vec!["Id", "Kind", "Cost", "Desc", "Date"]));
     // let mut total_expense = 0u32;
     for expense in expenses {
         if let Ok(expense) = expense {
@@ -835,10 +825,8 @@ fn add_new_expense(theme: &ColorfulTheme) {
     db.execute(
         INSERT_EXPENSE,
         params![
-            expense.card,
-            expense.ink,
-            expense.printer,
-            expense.maintanance,
+            expense.kind,
+            expense.cost,
             expense.description,
             expense.issued_at.to_string(),
         ],
@@ -876,7 +864,7 @@ fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
             .interact()
             .unwrap()]
         .as_str();
-    
+
         match prices.get(card_id).map(Vec::as_slice) {
             Some(&[lower_price, higher_price, ..]) => {
                 let mut table = Table::new();
@@ -897,7 +885,6 @@ fn show_card_pice(theme: &ColorfulTheme, prices: &HashMap<String, Vec<u32>>) {
             None => {
                 println!("Can not show the result. Maybe there is no row in Price lists!");
             }
-
         }
         if !Confirm::with_theme(theme)
             .with_prompt("Continue?")
@@ -955,7 +942,12 @@ fn report(theme: &ColorfulTheme) {
         }
         table.add_row(summary);
         println!("\n{}\n", table);
-        if !Confirm::with_theme(theme).with_prompt("Continue?").default(true).interact().unwrap(){
+        if !Confirm::with_theme(theme)
+            .with_prompt("Continue?")
+            .default(true)
+            .interact()
+            .unwrap()
+        {
             break;
         }
     }
