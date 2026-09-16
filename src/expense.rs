@@ -1,12 +1,10 @@
+use crate::get_parsi_date;
 use chrono::NaiveDate;
 use comfy_table::Cell;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use format_num::format_num;
-use crate::get_parsi_date;
 
-
-
-#[derive(Debug,Default)]
+#[derive(Debug, Default)]
 pub struct Expense {
     pub id: Option<u32>,
     pub kind: String,
@@ -16,21 +14,37 @@ pub struct Expense {
 }
 
 impl Expense {
-    pub const KIND:[&str;4] = ["card","ink", "printer", "maintanance"];
+    pub const KIND: [&str; 14] = [
+        "card",
+        "ink",
+        "printer",
+        "maintanance",
+        "kami-payment",
+        "bill-electricity",
+        "bill-water",
+        "bill-phone",
+        "pharmacy",
+        "meat",
+        "supermarket",
+        "printhouse",
+        "insurance",
+        "profit-transfer"
+    ];
     pub fn new_from_user(theme: &ColorfulTheme) -> Self {
         let mut new_expense = Expense::default();
 
         //let kind = ;
         let kind = Select::with_theme(theme)
             .with_prompt("Kind")
-            .items( Self::KIND)
+            .items(Self::KIND)
             .default(0)
             .interact()
-            .unwrap().to_owned();
+            .unwrap()
+            .to_owned();
         let cost = Input::<u32>::with_theme(theme)
             .with_prompt("Cost")
             .interact()
-            .unwrap();        
+            .unwrap();
         new_expense.cost = cost;
 
         new_expense.description = Input::<String>::with_theme(theme)
