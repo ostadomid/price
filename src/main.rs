@@ -970,6 +970,19 @@ fn create_auto_price_excel(config: &Config) {
     let (_, p) = tmp.keep().unwrap();
     open::that(&p);
 }
+fn fix_cards_with_photo(prices:&mut HashMap<String,Vec<u32>>){
+    let update = |e:&mut Vec<u32>|{
+        for price in e.iter_mut(){
+            *price+=4000;
+        }
+    };
+
+    for card_id in vec!["AL-430","AL-460","AL-463","AL-479"].iter().map(|e|e.to_string()){
+        prices.entry(card_id).and_modify(update);
+
+    }
+
+}
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     init_db()?;
@@ -981,6 +994,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut raw_prices = read_raw_prices()?;
     let mut prices = get_prices_from_raw_prices(&config);
+
+    // Some cards have extra cost this function fix the auto-price-from-raw-price
+    fix_cards_with_photo(&mut prices);
+    // ----
 
     loop {
         match Select::with_theme(&theme)
