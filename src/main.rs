@@ -1,4 +1,5 @@
 #![allow(dead_code, unused)]
+mod category;
 mod charts;
 mod expense;
 mod report;
@@ -30,9 +31,10 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, tempfile};
 
 use crate::{
-    expense::Expense,
-    report::InOutReport,
-    sql::{CREATE_EXPENSE_TABLE, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT, SHOW_EXPENSES},
+    category::Category, expense::Expense, report::InOutReport, sql::{
+        CREATE_EXPENSE_TABLE, GET_ROOT_CATEGORIES, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT,
+        SHOW_EXPENSES,
+    },
 };
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
@@ -801,7 +803,7 @@ fn show_expenses_table(start: NaiveDate, end: NaiveDate) {
             })
         })
         .unwrap();
-    
+
     // dbg!(&expenses.collect::<Vec<_>>());
     let mut table = Table::new();
     table.set_header(Row::from(vec!["Id", "Kind", "Cost", "Desc", "Date"]));
@@ -970,18 +972,39 @@ fn create_auto_price_excel(config: &Config) {
     let (_, p) = tmp.keep().unwrap();
     open::that(&p);
 }
-fn fix_cards_with_photo(prices:&mut HashMap<String,Vec<u32>>){
-    let update = |e:&mut Vec<u32>|{
-        for price in e.iter_mut(){
-            *price+=4000;
+fn fix_cards_with_photo(prices: &mut HashMap<String, Vec<u32>>) {
+    let update = |e: &mut Vec<u32>| {
+        for price in e.iter_mut() {
+            *price += 4000;
         }
     };
 
-    for card_id in vec!["AL-430","AL-460","AL-463","AL-479"].iter().map(|e|e.to_string()){
+    for card_id in vec!["AL-430", "AL-460", "AL-463", "AL-479"]
+        .iter()
+        .map(|e| e.to_string())
+    {
         prices.entry(card_id).and_modify(update);
-
     }
+}
+fn get_root_categories()->Vec<Category>{
+let db = get_db_connection().lock().unwrap();
+    let mut stm = db.prepare(GET_ROOT_CATEGORIES).unwrap();
+    let root_categories = stm.query_map([], |row| {
+        Ok(category::Category::new(
+            row.get_unwrap(0),
+            row.get_unwrap(1),
+            row.get(2).unwrap_or_default(),
+            row.get(3).ok(),
+        ))
+    });
+    root_categories.expect("Cant run query").filter_map(Result::ok).collect::<Vec<Category>>()
 
+}
+fn manage_categories(theme: &ColorfulTheme) {
+    
+    for category in get_root_categories(){
+        println!("{}", category.title);
+    }
 }
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -1010,6 +1033,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 "Report",
                 "Show Card Price",
                 "Auto Price Report",
+                "Categories",
                 "Quit",
             ])
             .default(0)
@@ -1022,9 +1046,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             3 => manage_expenses(&theme),
             4 => report(&theme),
             5 => show_card_pice(&theme, &prices),
-            6 => {
-                create_auto_price_excel(&config);
-            }
+            6 => create_auto_price_excel(&config),
+            7 => manage_categories(&theme),
             _ => break,
         }
     }
