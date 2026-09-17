@@ -27,6 +27,12 @@ pub const CREATE_EXPENSE_TABLE: &'static str = "CREATE TABLE IF NOT EXISTS expen
   description TEXT ,
   issued_at text NOT NULL
 );";
+pub const CREATE_CATEGORIES_TABLE :&str = "create table if not EXISTS categories (
+  id integer primary key NOT NULL,
+  title text NOT NULL,
+  description text,
+  parent integer
+);";
 
 pub const SHOW_EXPENSES:&str ="Select * from expenses2 where issued_at>=?1 and issued_at<=?2";
 
@@ -53,3 +59,10 @@ FROM
 	expenses2
 WHERE
 	expenses2.issued_at >=?1 AND expenses2.issued_at <=?2";
+
+  pub const GET_SUB_CATEGORIES:&str="WITH RECURSIVE tree AS(
+    select id, title from categoies where id = ?1
+    union all
+    select child.id, child.title from categories as child join tree where child.parent = tree.id
+
+  ) Select * from tree;";
