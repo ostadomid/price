@@ -1036,6 +1036,7 @@ fn add_category(theme: &ColorfulTheme) {
         .unwrap();
     let description = Input::<String>::with_theme(theme)
         .with_prompt("Description:")
+        .default("-".to_owned())
         .interact()
         .unwrap();
     let mut parent_id = None::<u32>;
@@ -1126,7 +1127,7 @@ fn manage_categories(theme: &ColorfulTheme) {
                 "Remove Category",
                 "Back",
             ])
-            .default(0)
+            .default(2)
             .interact()
             .unwrap()
         {
