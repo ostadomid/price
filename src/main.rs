@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 mod category;
+mod category_manager;
 mod charts;
 mod expense;
 mod report;
@@ -31,13 +32,19 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, tempfile};
 
 use crate::{
-    category::Category, expense::Expense, report::InOutReport, sql::{
-        CREATE_EXPENSE_TABLE, GET_ROOT_CATEGORIES, INSERT_EXPENSE, ORDERS_EXPENSE_REPORT,
-        SHOW_EXPENSES,
+    category::{Category, CategoryKind},
+    category_manager::CategoryManager,
+    expense::Expense,
+    report::InOutReport,
+    sql::{
+        CREATE_EXPENSE_TABLE, GET_ALL_CATEGORIES, GET_ROOT_CATEGORIES, INSERT_EXPENSE,
+        ORDERS_EXPENSE_REPORT, SHOW_EXPENSES,
     },
 };
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
+static CATEGORY_MANAGER: OnceLock<CategoryManager> = OnceLock::new();
+
 const MONTHS: [&str; 12] = [
     "Farvardin",
     "Ordibehesht",
@@ -402,6 +409,11 @@ fn init_db() -> Result<(), Box<dyn Error>> {
     c.execute(CREATE_EXPENSE_TABLE, [])
         .expect("Cant create expenses table ");
     let _ = DB_CONNECTION.set(Mutex::new(c));
+    Ok(())
+}
+fn init_category_manager() -> Result<(), Box<dyn Error>> {
+    let categories = get_categories(CategoryKind::All);
+    CATEGORY_MANAGER.set(CategoryManager::load(categories));
     Ok(())
 }
 fn get_db_connection() -> &'static Mutex<Connection> {
@@ -986,10 +998,15 @@ fn fix_cards_with_photo(prices: &mut HashMap<String, Vec<u32>>) {
         prices.entry(card_id).and_modify(update);
     }
 }
-fn get_root_categories()->Vec<Category>{
-let db = get_db_connection().lock().unwrap();
-    let mut stm = db.prepare(GET_ROOT_CATEGORIES).unwrap();
-    let root_categories = stm.query_map([], |row| {
+fn get_categories(kind: CategoryKind) -> Vec<Category> {
+    let db = get_db_connection().lock().unwrap();
+    let sql = match kind {
+        CategoryKind::All => GET_ALL_CATEGORIES,
+        CategoryKind::Root => GET_ROOT_CATEGORIES,
+        CategoryKind::Child(_) => todo!(),
+    };
+    let mut stm = db.prepare(sql).unwrap();
+    let categories = stm.query_map([], |row| {
         Ok(category::Category::new(
             row.get_unwrap(0),
             row.get_unwrap(1),
@@ -997,18 +1014,136 @@ let db = get_db_connection().lock().unwrap();
             row.get(3).ok(),
         ))
     });
-    root_categories.expect("Cant run query").filter_map(Result::ok).collect::<Vec<Category>>()
+    categories
+        .expect("Cant run query")
+        .filter_map(Result::ok)
+        .collect::<Vec<Category>>()
+}
 
+fn show_categories(categories: &[Category]) {
+    let mut table = Table::new();
+    table.set_header(["Id", "Title", "Desc", "Parent"]);
+
+    for category in categories {
+        table.add_row(category);
+    }
+    println!("{table}");
+}
+fn add_category(theme: &ColorfulTheme) {
+    let title = Input::<String>::with_theme(theme)
+        .with_prompt("Category name:")
+        .interact()
+        .unwrap();
+    let description = Input::<String>::with_theme(theme)
+        .with_prompt("Description:")
+        .interact()
+        .unwrap();
+    let mut parent_id = None::<u32>;
+
+    if !Confirm::with_theme(theme)
+        .with_prompt("Is it Root category?")
+        .default(false)
+        .interact()
+        .unwrap()
+    {
+        let roots = get_categories(CategoryKind::Root);
+        let pairs = roots
+            .iter()
+            .map(|c| (c.id, c.title.as_str()))
+            .collect::<Vec<(u32, &str)>>();
+
+        let parent_idx = FuzzySelect::with_theme(theme)
+            .with_prompt("Choose Parent")
+            .items(pairs.iter().map(|p| p.1))
+            .default(0)
+            .interact()
+            .unwrap();
+        parent_id = Some(pairs[parent_idx].0);
+    }
+    if let Ok(db) = get_db_connection().lock() {
+        let mut stm = db
+            .prepare("INSERT INTO categories(title,description,parent) values(?1,?2,?3) ")
+            .unwrap();
+        stm.execute(params![title, description, parent_id]).unwrap();
+        println!("{}", "New category added".green().bold());
+    }
+}
+fn remove_category(theme: &ColorfulTheme) {
+    let pairs = get_categories(CategoryKind::All)
+        .iter()
+        .map(|c| (c.id, c.title.clone(), c.parent.is_none()))
+        .collect::<Vec<(u32, String, bool)>>();
+    let selected = FuzzySelect::with_theme(theme)
+        .items(pairs.iter().map(|p| p.1.as_str()).collect::<Vec<&str>>())
+        .interact_opt()
+        .unwrap();
+    if let Some(idx) = selected {
+        let id = pairs[idx].0;
+        let title = pairs[idx].1.as_str();
+        let is_root_category = pairs[idx].2;
+
+        if is_root_category {
+            let msg = format!(
+                "Can not delete tag {} with id {}, because it is a Root category",
+                title, id
+            )
+            .red()
+            .bold()
+            .to_string();
+            println!("{msg}");
+            return;
+        }
+        if Confirm::with_theme(theme)
+            .with_prompt(
+                format!("Are you sure to remove {} with id {}", title, id)
+                    .red()
+                    .to_string(),
+            )
+            .default(false)
+            .interact()
+            .unwrap()
+        {
+            if let Ok(db) = get_db_connection().lock() {
+                let mut stm = db
+                    .prepare(
+                        "DELETE from categories where id=?1 and title=?2 and parent is not null",
+                    )
+                    .unwrap();
+                stm.execute(params![id, title]).unwrap();
+                println!("{}", "Tag Removed!".green());
+            }
+        }
+    }
 }
 fn manage_categories(theme: &ColorfulTheme) {
-    
-    for category in get_root_categories(){
-        println!("{}", category.title);
+    loop {
+        match Select::with_theme(theme)
+            .with_prompt("")
+            .items([
+                "Show All Categories",
+                "Show Root Categories",
+                "Add Category",
+                "Remove Category",
+                "Back",
+            ])
+            .default(0)
+            .interact()
+            .unwrap()
+        {
+            0 => show_categories(&get_categories(CategoryKind::All)),
+            1 => show_categories(&get_categories(CategoryKind::Root)),
+            2 => add_category(theme),
+            3 => remove_category(theme),
+            _ => {
+                break;
+            }
+        }
     }
 }
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     init_db()?;
+    init_category_manager()?;
     let config = read_config("./data.json")?;
     let mut theme = ColorfulTheme {
         active_item_style: Style::new().yellow(),

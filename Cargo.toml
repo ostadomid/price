@@ -27,5 +27,6 @@ dotenvy = "0.15"
 rust_xlsxwriter = "0.99.0"
 open = "5.4.4"
 tempfile = "3.27.0"
+indextree = "4.9.1"
 # ratatui = "0.30.2"
 # diesel = { version = "2.2.0", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }

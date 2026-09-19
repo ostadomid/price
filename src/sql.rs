@@ -60,10 +60,11 @@ FROM
 WHERE
 	expenses2.issued_at >=?1 AND expenses2.issued_at <=?2";
 
-  pub const GET_ROOT_CATEGORIES:&str ="select * from categories where parent is null";
+  pub const GET_ALL_CATEGORIES:&str ="select * from categories order by parent, id";
+  pub const GET_ROOT_CATEGORIES:&str ="select * from categories where parent is null order by id";
   pub const GET_SUB_CATEGORIES:&str="WITH RECURSIVE tree AS(
     select id, title from categoies where id = ?1
     union all
     select child.id, child.title from categories as child join tree where child.parent = tree.id
 
-  ) Select * from tree;";
+  ) Select * from tree order by id;";
