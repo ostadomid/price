@@ -26,8 +26,8 @@ impl InOutReport {
             title: "Summary".into(),
             v1: income.v1.saturating_sub(outcome.v1) ,
             v2: income.v2.saturating_sub(outcome.v2),
-            v3: 0,
-            v4: income.v4 - (income.v3 +outcome.v1 + outcome.v2), // موجودی فعلی حساب را منهای هزینه های کارت و جوهر و پرینتر و سود میکنیم تا مانده حساب پیدا شود
+            v3: income.v3.saturating_sub(outcome.v3),
+            v4: income.v4 - (/*income.v3 + */ outcome.v1 + outcome.v2 + outcome.v3), // موجودی فعلی حساب را منهای هزینه های کارت و جوهر و پرینتر و سود میکنیم تا مانده حساب پیدا شود
         }
     }
 }

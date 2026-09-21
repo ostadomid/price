@@ -53,7 +53,7 @@ SELECT
   '-' as `outcome`,
 	COALESCE(sum( CASE WHEN kind = 'card' THEN cost ELSE 0 END ),0) as 'raw-card',
 	COALESCE(sum( CASE WHEN kind = 'ink' OR kind = 'printer' OR kind = 'maintenance' THEN cost ELSE 0 END ),0) as 'ink+printer+maintain',
-	0 as ' ',
+	COALESCE(sum( CASE WHEN kind in ( select title from categories where parent not in (select id from categories where title='supplies')  ) then cost else 0 end),0),
 	0 as '  '
 FROM
 	expenses2
