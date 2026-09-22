@@ -17,7 +17,11 @@ use std::{
 
 use chrono::NaiveDate;
 use colored::*;
-use comfy_table::{Cell, Color::{self, Green, Yellow}, Row, Table};
+use comfy_table::{
+    Cell,
+    Color::{self, Green, Yellow},
+    Row, Table,
+};
 use dialoguer::{Confirm, FuzzySelect, Input, Select, console::Style, theme::ColorfulTheme};
 use format_num::format_num;
 use num_format::{
@@ -150,19 +154,27 @@ impl Order {
             .interact()
             .unwrap();
         let card_id = &keys[card_idx];
+
+        let is_atelier = if card_id.eq("AT-000") { true } else { false };
+
         let card_raw_price = *raw_prices.get(card_id).unwrap_or(&0);
         let card_prices = prices.get(card_id).unwrap();
-        let card_final_price = card_prices[Select::with_theme(theme)
-            .with_prompt("Card Price")
-            .items(
-                card_prices
-                    .iter()
-                    .map(|e| format_num!(",.0f", *e))
-                    .collect::<Vec<String>>(),
-            )
-            .default(0)
-            .interact()
-            .unwrap()];
+        let card_final_price = match is_atelier {
+            true => 0,
+            false => {
+                card_prices[Select::with_theme(theme)
+                    .with_prompt("Card Price")
+                    .items(
+                        card_prices
+                            .iter()
+                            .map(|e| format_num!(",.0f", *e))
+                            .collect::<Vec<String>>(),
+                    )
+                    .default(0)
+                    .interact()
+                    .unwrap()]
+            }
+        };
         let order_count = Input::<u32>::with_theme(theme)
             .with_prompt("Order Count")
             .default(1)
@@ -210,8 +222,15 @@ impl Order {
         let ordered_at = get_parsi_date(theme);
         let ordered_at = ordered_at.to_gregorian().unwrap();
 
-        let card_cost = (card_final_price as f64) / (1.0 + config.profit_margin);
-        let card_profit = card_cost * config.profit_margin;
+        let mut card_cost = (card_final_price as f64) / (1.0 + config.profit_margin);
+        let mut card_profit = card_cost * config.profit_margin;
+
+        // Fix Atelier 
+        if is_atelier{
+            card_cost = 0.0;
+            card_profit = 0.0;
+        }
+        // 
 
         let order_profit = order_count as f64 * card_profit + design_cost as f64 - discount as f64;
         let customer_paid = order_count as f64 * card_cost * (1.0 + config.profit_margin)
@@ -708,6 +727,7 @@ fn add_new_order(
     raw_prices: &HashMap<String, u32>,
 ) {
     let new_order = Order::new_from_user(config, theme, prices, raw_prices);
+
     println!("{}", create_ui_table_from_order(&new_order));
     if !Confirm::with_theme(theme)
         .with_prompt("Add this order?")
@@ -971,7 +991,6 @@ fn report(theme: &ColorfulTheme) {
             Cell::from(format_num!(",.0f", total_profit)).fg(Green),
         ]);
         println!("{table}\n\n");
-        
 
         if !Confirm::with_theme(theme)
             .with_prompt("Continue?")
@@ -1007,7 +1026,7 @@ fn fix_cards_with_photo(prices: &mut HashMap<String, Vec<u32>>) {
             *price += 4000;
         }
     };
-
+    // prices.entry("AT-000".to_owned()).and_modify(|f| f[0] = -4300);
     for card_id in vec!["AL-430", "AL-460", "AL-463", "AL-479"]
         .iter()
         .map(|e| e.to_string())
