@@ -17,7 +17,7 @@ use std::{
 
 use chrono::NaiveDate;
 use colored::*;
-use comfy_table::{Cell, Color, Row, Table};
+use comfy_table::{Cell, Color::{self, Green, Yellow}, Row, Table};
 use dialoguer::{Confirm, FuzzySelect, Input, Select, console::Style, theme::ColorfulTheme};
 use format_num::format_num;
 use num_format::{
@@ -950,12 +950,29 @@ fn report(theme: &ColorfulTheme) {
         let mut table = Table::new();
         table.set_header(vec!["", "Card", "Ink/Printer", "Profit", "Balance"]);
         let rows = rows.filter_map(|e| e.ok()).collect::<Vec<_>>();
+
         let summary = InOutReport::summary(&rows[0], &rows[1]);
+        let total_card_ink_printer = summary.v1 + summary.v2;
+        let total_profit = summary.v4 - (summary.v1 + summary.v2);
+
         for row in rows {
             table.add_row(row);
         }
         table.add_row(summary);
-        println!("\n{}\n", table);
+        println!("\n\n{}\n", table);
+
+        let mut table = Table::new();
+        table.add_row(vec![
+            Cell::from(" Card + Ink/Printer ").fg(Yellow),
+            Cell::from(format_num!(",.0f", total_card_ink_printer)).fg(Green),
+        ]);
+        table.add_row(vec![
+            Cell::from("Profit").fg(Yellow),
+            Cell::from(format_num!(",.0f", total_profit)).fg(Green),
+        ]);
+        println!("{table}\n\n");
+        
+
         if !Confirm::with_theme(theme)
             .with_prompt("Continue?")
             .default(true)

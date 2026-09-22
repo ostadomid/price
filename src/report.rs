@@ -6,21 +6,24 @@ use comfy_table::{
 
 pub struct InOutReport {
     title: String,
-    v1: u32,
-    v2: u32,
-    v3: u32,
-    v4: u32,
+    pub v1: u32,
+    pub v2: u32,
+    pub v3: u32,
+    pub v4: u32,
 }
 impl InOutReport {
     pub fn new(title: String, v1: u32, v2: u32, v3: u32, v4: u32) -> Self {
         Self {
             title,
-            v1,
-            v2,
-            v3,
-            v4,
+            v1, /* card */
+            v2, /* ink-printer */
+            v3, /* profit */
+            v4, /* balance */
         }
     }
+    // pub fn car_plus_ink_plus_printer(&self)->u32{
+    //     self.v1 + self.v2
+    // }
     pub fn summary(income: &Self, outcome: &Self) -> Self {
         Self {
             title: "Summary".into(),
