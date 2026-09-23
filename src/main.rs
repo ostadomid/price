@@ -23,7 +23,7 @@ use comfy_table::{
     Color::{self, Green, Yellow},
     Row, Table,
 };
-use dialoguer::{Confirm, FuzzySelect, Input, Select, console::Style, theme::ColorfulTheme};
+use dialoguer::{Confirm, FuzzySelect, Input, Select, console::{self, Style}, theme::ColorfulTheme};
 use format_num::format_num;
 use num_format::{
     Buffer, Format,
@@ -37,14 +37,10 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, tempfile};
 
 use crate::{
-    category::{Category, CategoryKind},
-    category_manager::CategoryManager,
-    expense::Expense,
-    report::InOutReport,
-    sql::{
+    category::{Category, CategoryKind}, category_manager::CategoryManager, expense::Expense, report::InOutReport, sql::{
         CREATE_EXPENSE_TABLE, GET_ALL_CATEGORIES, GET_ROOT_CATEGORIES, INSERT_EXPENSE,
         ORDERS_EXPENSE_REPORT, SHOW_EXPENSES,
-    },
+    }, ui::date::DateRange,
 };
 
 static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
@@ -954,8 +950,13 @@ fn report(theme: &ColorfulTheme) {
     let db = get_db_connection().lock().unwrap();
     let mut stm = db.prepare(ORDERS_EXPENSE_REPORT).unwrap();
     loop {
-        let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
-        let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+        // let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+        // let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
+
+        let range = DateRange::new_from_ui(theme);
+        let start = range.start.to_string();
+        let end = range.end.to_string();
+        
         let mut report: Vec<(u32, u32, u32, u32)> = Vec::new();
         let rows = stm
             .query_map([&start, &end], |row| {
@@ -1187,7 +1188,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     init_category_manager()?;
     let config = read_config("./data.json")?;
     let mut theme = ColorfulTheme {
+        
         active_item_style: Style::new().yellow(),
+        fuzzy_match_highlight_style: Style::new().fg(console::Color::Cyan),
         ..Default::default()
     };
 

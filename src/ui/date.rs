@@ -1,7 +1,11 @@
 use std::error::Error;
 
 use chrono::NaiveDate;
-use dialoguer::{Select, theme::ColorfulTheme};
+use dialoguer::{
+    FuzzySelect, Select,
+    console::{Color, Style},
+    theme::ColorfulTheme,
+};
 
 macro_rules! hashmap {
     ( $($key:expr=>$value:expr),* $(,)? ) => {
@@ -30,8 +34,8 @@ pub const MONTHS: [&str; 12] = [
 
 #[derive(Debug, Clone)]
 pub struct DateRange {
-    start: NaiveDate,
-    end: NaiveDate,
+    pub start: NaiveDate,
+    pub end: NaiveDate,
 }
 
 pub fn generate_dates() -> Result<Vec<String>, Box<dyn Error>> {
@@ -67,16 +71,12 @@ fn current_month() -> &'static str {
 impl DateRange {
     pub fn new_from_ui(theme: &ColorfulTheme) -> Self {
         let dates = generate_dates().expect("Can not generate dates");
-        let menu_items = [
-            "All",
-            prev_month(),
-            current_month(),
-            "Range",
-        ];
+        let menu_items = ["All", prev_month(), current_month(), "Range"];
         let beginning = parsidate::ParsiDate::new(1405, 5, 1).unwrap();
         let today = parsidate::ParsiDate::today().unwrap();
         match Select::with_theme(theme)
             .items(menu_items)
+            .default(0)
             .interact()
             .unwrap()
         {
@@ -103,7 +103,30 @@ impl DateRange {
                 end: today.last_day_of_month().to_gregorian().unwrap(),
             },
             3 => {
-                unimplemented!()
+                let items = generate_dates().unwrap();
+                
+                let start = items[FuzzySelect::with_theme(theme)
+                    .items(&items)
+                    .max_length(5)
+                    .interact()
+                    .unwrap()]
+                .as_str();
+                let start = parsidate::ParsiDate::parse(start, "%Y/%m/%d")
+                    .unwrap()
+                    .to_gregorian()
+                    .unwrap();
+
+                let end = items[FuzzySelect::with_theme(theme)
+                    .items(&items)
+                    .max_length(5)
+                    .interact()
+                    .unwrap()]
+                .as_str();
+                let end = parsidate::ParsiDate::parse(end, "%Y/%m/%d")
+                    .unwrap()
+                    .to_gregorian()
+                    .unwrap();
+                Self { start, end }
             }
             _ => unimplemented!(),
         }

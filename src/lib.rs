@@ -1,39 +1,38 @@
+#![allow(dead_code, unused)]
+
 #[cfg(test)]
 pub mod tests {
+    use std::error::Error;
+
     #[test]
-    #[allow(dead_code, unused)]
-    pub fn one() {
-        struct Category {
-            id: u32,
-            title: String,
-        }
-        impl Category {
-            fn new(id: u32, title: &str) -> Self {
-                Self {
-                    id,
-                    title: title.into(),
+    pub fn one() -> Result<(), Box<dyn Error>> {
+        let year = parsidate::ParsiDate::today()?.year();
+        let mut dates = Vec::<String>::with_capacity(366 * 2);
+        for y in year..=year + 1 {
+            for m in 1..=12 {
+                for d in 1..=31 {
+                    let instance = unsafe { parsidate::ParsiDate::new_unchecked(y, m, d) };
+                    if instance.is_valid() {
+                        dates.push(instance.format("short"));
+                    }
                 }
             }
         }
-        // let mut arena = &mut indextree::Arena::<Category>::new();
-        // let mut a = arena.new_node(Category::new(1, "bill"));
-        // let mut b = arena.new_node(Category::new(1, "water"));
-        // let mut c = arena.new_node(Category::new(1, "gas"));
-        // a.append(b, arena);
-        // a.append(c, arena);
-        // let ancestors = b.ancestors(arena).collect::<Vec<_>>();
-        // let bread = ancestors
-        //     .iter()
-        //     .rev()
-        //     .map(|e| arena[*e].get().title.as_str())
-        //     .copied();
-        //   bread.
-            
-            
-        // println!("{bread}");
-        // for nid in ancestors {
-        //     println!("{}", arena[nid].get().title);
-        // }
-        // assert_eq!(a.child_count(arena), 2);
+        type DateRange = (String, String);
+
+        let today = parsidate::ParsiDate::today()?;
+        let today_in_last_month = today.sub_months(1)?;
+        today.to_gregorian()?.format("%Y-%m-%d");
+        let current_month: DateRange = (
+            today.first_day_of_month().format("short"),
+            today.last_day_of_month().format("short"),
+        );
+        let prev_month: DateRange = (
+            today_in_last_month.first_day_of_month().format("short"),
+            today_in_last_month.last_day_of_month().format("short"),
+        );
+    
+
+        Ok(())
     }
 }
