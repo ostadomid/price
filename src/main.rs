@@ -5,6 +5,7 @@ mod charts;
 mod expense;
 mod report;
 mod sql;
+mod ui;
 use std::{
     collections::HashMap,
     env,
@@ -1179,6 +1180,9 @@ fn manage_categories(theme: &ColorfulTheme) {
 }
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+
+    
+
     init_db()?;
     init_category_manager()?;
     let config = read_config("./data.json")?;
