@@ -1202,11 +1202,24 @@ fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32
                     .with_prompt("Card ID")
                     .interact_text()
                     .unwrap();
-                if raw_prices.contains_key(&card_id){
-                    
-                }else{
-
+                let mut inserted = false;
+                let current_price = raw_prices.entry(card_id.clone()).or_insert_with_key(|key| {
+                    inserted = true;
+                    let new_price = Input::with_theme(theme)
+                        .with_prompt("Enter raw price")
+                        .interact()
+                        .unwrap();
+                    new_price
+                });
+                if !inserted {
+                    let new_price = Input::with_theme(theme)
+                        .with_prompt("Enter card NEW raw price:")
+                        .default(*current_price)
+                        .interact()
+                        .unwrap();
+                    *raw_prices.get_mut(&card_id).unwrap()= new_price;
                 }
+                println!("{}", "Done!".green() );
             }
             1 => {}
             2 => break,
