@@ -613,39 +613,9 @@ fn get_parsi_date(theme: &ColorfulTheme) -> parsidate::ParsiDate {
 }
 
 fn show_orders(theme: &ColorfulTheme) {
-    match Select::with_theme(theme)
-        .with_prompt("Select")
-        .items(["Current Month", "Range", "Specified Card"])
-        .default(0)
-        .interact()
-        .unwrap()
-    {
-        0 => {
-            let start = parsidate::ParsiDate::today()
-                .unwrap()
-                .first_day_of_month()
-                .to_gregorian()
-                .unwrap();
-            let end = parsidate::ParsiDate::today()
-                .unwrap()
-                .last_day_of_month()
-                .to_gregorian()
-                .unwrap();
-            show_orders_table(start, end);
-        }
-        1 => {
-            let (start, end) = (
-                get_parsi_date(theme).to_gregorian().unwrap(),
-                get_parsi_date(theme).to_gregorian().unwrap(),
-            );
-            show_orders_table(start, end);
-        }
-        2 => {
-            show_orders_for_specific_card(theme);
-        }
-        _ => unimplemented!(),
-    }
-}
+   let Some(date_range) = DateRange::new_from_ui(theme) else {return};
+   show_orders_table(date_range.start, date_range.end);
+ }
 fn show_orders_for_specific_card(theme: &ColorfulTheme) {}
 fn show_orders_table(start: NaiveDate, end: NaiveDate) {
     println!("{}-{}", start, end);
@@ -676,6 +646,7 @@ fn show_orders_table(start: NaiveDate, end: NaiveDate) {
     //let orders: Vec<Order> = orders.map(|e| e.unwrap()).collect();
     //let table = create_ui_table_from_all_orders(&orders);
     let mut table = Table::new();
+    table.set_header(["Id","Card","Count","Raw Price","Card Cost","Profit","Design","Discount","Paid","When"]);
 
     let mut total_profit = 0u32;
     let mut total_initial = 0u32;
@@ -693,30 +664,31 @@ fn show_orders_table(start: NaiveDate, end: NaiveDate) {
         }
     }
     println!("{}", table);
+    println!("{}\n\n","Card Cost + Profit = Card Final Price".red().bold());
     println!(
-        "{:>32} {}",
-        "Total Initial:".yellow(),
+        "{:>20} {}",
+        "Card/Ink/Printer:".yellow(),
         format_num!(",.0f", total_initial).green()
     );
     println!(
-        "{:>32} {}",
+        "{:>20} {}",
         "Total  Profit:".yellow(),
         format_num!(",.0f", total_profit).green()
     );
     println!(
-        "{:>32} {}",
+        "{:>20} {}",
         "Total  Paid:".yellow(),
         format_num!(",.0f", total_paid).blue()
     );
     println!("{}", "-".repeat(44));
     println!(
-        "{:>32} {}",
-        "Initial        -> Card Portion:".yellow(),
+        "{:>20} {}",
+        "Card Portion:".yellow(),
         format_num!(",.0f", card_portion_of_initial).green()
     );
     println!(
-        "{:>32} {}\n\n",
-        "Initial -> Ink/Printer Portion:".yellow(),
+        "{:>20} {}\n\n",
+        "Ink/Printer Portion:".yellow(),
         format_num!(",.0f", total_initial - card_portion_of_initial).green()
     );
 
@@ -773,55 +745,26 @@ fn manage_orders(
     prices: &HashMap<String, Vec<u32>>,
     raw_prices: &HashMap<String, u32>,
 ) {
+    let menu_items = ["Add New Order", "Show Orders", "Back"];
     loop {
+        println!("");
         match Select::with_theme(theme)
-            .items(["Show Orders", "Add New Order", "Back"])
-            .default(1)
+            .items(menu_items)
+            .default(0)
             .interact()
             .unwrap()
         {
-            0 => {
-                show_orders(theme);
-            }
-            1 => {
-                add_new_order(config, theme, prices, raw_prices);
-            }
-            _ => {
-                break;
-            }
+            0 => add_new_order(config, theme, prices, raw_prices),
+            1 => show_orders(theme),
+            _ => break,
         }
     }
 }
 fn show_expenses(theme: &ColorfulTheme) {
-    match Select::with_theme(theme)
-        .with_prompt("Select")
-        .items(["Current Month", "Range"])
-        .default(0)
-        .interact()
-        .unwrap()
-    {
-        0 => {
-            let start = parsidate::ParsiDate::today()
-                .unwrap()
-                .first_day_of_month()
-                .to_gregorian()
-                .unwrap();
-            let end = parsidate::ParsiDate::today()
-                .unwrap()
-                .last_day_of_month()
-                .to_gregorian()
-                .unwrap();
-            show_expenses_table(start, end);
-        }
-        1 => {
-            let (start, end) = (
-                get_parsi_date(theme).to_gregorian().unwrap(),
-                get_parsi_date(theme).to_gregorian().unwrap(),
-            );
-            show_expenses_table(start, end);
-        }
-        _ => unimplemented!(),
-    }
+    let Some(date_range) = ui::date::DateRange::new_from_ui(theme) else {
+        return;
+    };
+    show_expenses_table(date_range.start, date_range.end);
 }
 fn show_expenses_table(start: NaiveDate, end: NaiveDate) {
     let db = get_db_connection().lock().unwrap();
@@ -875,22 +818,18 @@ fn add_new_expense(theme: &ColorfulTheme) {
     println!("{}", "New expense added".green());
 }
 fn manage_expenses(theme: &ColorfulTheme) {
+    let menu_items = ["Add New Expense", "Show Expenses", "Back"];
+    println!("");
     loop {
         match Select::with_theme(theme)
-            .items(["Show Expenses", "Add New Expense", "Back"])
-            .default(1)
+            .items(menu_items)
+            .default(0)
             .interact()
             .unwrap()
         {
-            0 => {
-                show_expenses(theme);
-            }
-            1 => {
-                add_new_expense(theme);
-            }
-            _ => {
-                break;
-            }
+            0 => add_new_expense(theme),
+            1 => show_expenses(theme),
+            _ => break,
         }
     }
 }
@@ -955,14 +894,18 @@ fn manage_report(theme: &ColorfulTheme) {
 
     // match Select::with_theme(theme).with_prompt("Choose One").items(vec!["From Beginning",""]);
 }
-fn report(theme: &ColorfulTheme) {
+fn balance_report(theme: &ColorfulTheme) {
     let db = get_db_connection().lock().unwrap();
     let mut stm = db.prepare(ORDERS_EXPENSE_REPORT).unwrap();
+    println!("");
     loop {
         // let start = get_parsi_date(theme).to_gregorian().unwrap().to_string();
         // let end = get_parsi_date(theme).to_gregorian().unwrap().to_string();
 
-        let range = DateRange::new_from_ui(theme);
+        let Some(range) = DateRange::new_from_ui(theme) else {
+            break;
+        };
+
         let start = range.start.to_string();
         let end = range.end.to_string();
 
@@ -1168,28 +1111,27 @@ fn manage_categories(theme: &ColorfulTheme) {
         match Select::with_theme(theme)
             .with_prompt("")
             .items([
-                "Show All Categories",
-                "Show Root Categories",
                 "Add Category",
                 "Remove Category",
+                "Show All Categories",
+                "Show Root Categories",
                 "Back",
             ])
-            .default(2)
+            .default(0)
             .interact()
             .unwrap()
         {
-            0 => show_categories(&get_categories(CategoryKind::All)),
-            1 => show_categories(&get_categories(CategoryKind::Root)),
-            2 => add_category(theme),
-            3 => remove_category(theme),
-            _ => {
-                break;
-            }
+            0 => add_category(theme),
+            1 => remove_category(theme),
+            2 => show_categories(&get_categories(CategoryKind::All)),
+            3 => show_categories(&get_categories(CategoryKind::Root)),
+            _ => break,
         }
     }
 }
 fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32>) {
-    let menu_items = ["Add New Card", "Change Price", "Back"];
+    let menu_items = ["Add / Edit Price", "Back"];
+
     loop {
         match Select::with_theme(theme)
             .items(menu_items)
@@ -1198,32 +1140,79 @@ fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32
             .unwrap()
         {
             0 => {
-                let mut card_id: String = Input::with_theme(theme)
-                    .with_prompt("Card ID")
-                    .interact_text()
+                let mut card_ids = Vec::<&str>::new();
+
+                card_ids.push("New Card");
+                card_ids.extend(raw_prices.keys().map(|e| e.as_str()));
+
+                let idx = FuzzySelect::with_theme(theme)
+                    .with_prompt("Select Card")
+                    .items(&card_ids)
+                    .max_length(5)
+                    .interact()
                     .unwrap();
-                let mut inserted = false;
-                let current_price = raw_prices.entry(card_id.clone()).or_insert_with_key(|key| {
-                    inserted = true;
-                    let new_price = Input::with_theme(theme)
-                        .with_prompt("Enter raw price")
+                let mut card_id;
+                if idx == 0 {
+                    card_id = Input::with_theme(theme)
+                        .with_prompt("New card id")
                         .interact()
                         .unwrap();
-                    new_price
-                });
-                if !inserted {
-                    let new_price = Input::with_theme(theme)
-                        .with_prompt("Enter card NEW raw price:")
-                        .default(*current_price)
-                        .interact()
-                        .unwrap();
-                    *raw_prices.get_mut(&card_id).unwrap()= new_price;
+                } else {
+                    card_id = card_ids[idx].to_string();
                 }
-                println!("{}", "Done!".green() );
+                let current_price = raw_prices.entry(card_id).or_default();
+                let new_price = Input::with_theme(theme)
+                    .with_prompt("Price: ")
+                    .default(*current_price)
+                    .interact()
+                    .unwrap();
+                *current_price = new_price;
+                println!("{}", "Done!".green());
             }
-            1 => {}
-            2 => break,
-            _ => unimplemented!(),
+            _ => break,
+        }
+    }
+}
+
+fn manage_prices(
+    theme: &ColorfulTheme,
+    config: &Config,
+    raw_prices: &mut HashMap<String, u32>,
+    prices: &HashMap<String, Vec<u32>>,
+) {
+    let menu_items = [
+        "Modify Raw Prices",
+        "Show Card Price",
+        "Generate Raw->Final Excel",
+        "Back",
+    ];
+    println!("");
+    loop {
+        match Select::with_theme(theme)
+            .items(&menu_items)
+            .default(0)
+            .interact()
+            .unwrap()
+        {
+            0 => manage_raw_prices(theme, raw_prices),
+            1 => show_card_pice(theme, prices),
+            2 => create_auto_price_excel(config),
+            _ => break,
+        }
+    }
+}
+fn manage_settings(theme: &ColorfulTheme) {
+    let menu_items = ["Categories", "Back"];
+    println!("");
+    loop {
+        match Select::with_theme(theme)
+            .items(menu_items)
+            .default(0)
+            .interact()
+            .unwrap()
+        {
+            0 => manage_categories(theme),
+            _ => break,
         }
     }
 }
@@ -1247,32 +1236,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     loop {
         match Select::with_theme(&theme)
-            .with_prompt("Choose")
             .items([
-                "Price Calculator",
-                "Profit Calculator",
-                "Orders",
-                "Expenses",
-                "Report",
-                "Show Card Price",
-                "Auto Price Report",
-                "Categories",
-                "Raw Prices",
-                "Quit",
+                "Orders", "Expenses", "Prices", "Balance", "Settings", "Quit",
             ])
             .default(0)
+            .report(false)
             .interact()
             .unwrap()
         {
-            0 => calculate_final_price(&config, &theme),
-            1 => calculate_profit2(&config, &theme, &prices),
-            2 => manage_orders(&config, &theme, &prices, &raw_prices),
-            3 => manage_expenses(&theme),
-            4 => report(&theme),
-            5 => show_card_pice(&theme, &prices),
-            6 => create_auto_price_excel(&config),
-            7 => manage_categories(&theme),
-            8 => manage_raw_prices(&theme, &mut raw_prices),
+            0 => manage_orders(&config, &theme, &prices, &raw_prices),
+            1 => manage_expenses(&theme),
+            2 => manage_prices(&theme, &config, &mut raw_prices, &prices),
+            3 => balance_report(&theme),
+            4 => manage_settings(&theme),
             _ => break,
         }
     }

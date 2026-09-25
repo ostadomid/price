@@ -69,9 +69,9 @@ fn current_month() -> &'static str {
 }
 
 impl DateRange {
-    pub fn new_from_ui(theme: &ColorfulTheme) -> Self {
+    pub fn new_from_ui(theme: &ColorfulTheme) -> Option<Self> {
         let dates = generate_dates().expect("Can not generate dates");
-        let menu_items = ["All", prev_month(), current_month(), "Range"];
+        let menu_items = ["All", prev_month(), current_month(), "Range","Back"];
         let beginning = parsidate::ParsiDate::new(1405, 5, 1).unwrap();
         let today = parsidate::ParsiDate::today().unwrap();
         match Select::with_theme(theme)
@@ -80,11 +80,11 @@ impl DateRange {
             .interact()
             .unwrap()
         {
-            0 => Self {
+            0 => Some(Self {
                 start: beginning.to_gregorian().unwrap(),
                 end: today.to_gregorian().unwrap(),
-            },
-            1 => Self {
+            }),
+            1 => Some(Self {
                 start: today
                     .sub_months(1)
                     .unwrap()
@@ -97,11 +97,11 @@ impl DateRange {
                     .last_day_of_month()
                     .to_gregorian()
                     .unwrap(),
-            },
-            2 => Self {
+            }),
+            2 => Some(Self {
                 start: today.first_day_of_month().to_gregorian().unwrap(),
                 end: today.last_day_of_month().to_gregorian().unwrap(),
-            },
+            }),
             3 => {
                 let items = generate_dates().unwrap();
                 
@@ -126,9 +126,9 @@ impl DateRange {
                     .unwrap()
                     .to_gregorian()
                     .unwrap();
-                Self { start, end }
+                Some(Self { start, end })
             }
-            _ => unimplemented!(),
+            _ => None,
         }
     }
 }
