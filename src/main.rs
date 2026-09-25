@@ -13,6 +13,7 @@ use std::{
     fmt::Display,
     fs::File,
     io::{BufReader, BufWriter},
+    os::raw,
     sync::{LazyLock, Mutex, OnceLock},
 };
 
@@ -41,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, tempfile};
 
 use crate::{
+    Shipment::Inventory,
     category::{Category, CategoryKind},
     category_manager::CategoryManager,
     expense::Expense,
@@ -117,6 +119,99 @@ struct Config {
     ink_price: u32,
     shipment_cost: Vec<Shipment>,
     profit_margin: f64,
+}
+impl Config {
+    pub fn printer_depreciation_per_paper(&self) -> u32 {
+        self.printer_price / self.total_prints
+    }
+    pub fn ink_cost_per_paper(&self) -> u32 {
+        self.ink_price / self.total_prints
+    }
+    pub fn shipment_for_inventory(&self) -> u32 {
+        *self
+            .shipment_cost
+            .iter()
+            .find_map(|s| {
+                if let Inventory(cost) = s {
+                    Some(cost)
+                } else {
+                    None
+                }
+            })
+            .expect("Can not get Inventory shipment cost")
+    }
+    pub fn final_price(
+        raw_price: u32,
+        shipment_cost: u32,
+        printer_depreciation_per_paper: u32,
+        ink_cost_per_paper: u32,
+        profit_margin: f64,
+    ) -> u32 {
+        let result = ((raw_price as f64 * 1.05
+            + (ink_cost_per_paper + printer_depreciation_per_paper + shipment_cost) as f64)
+            * (1.0 + profit_margin)) as u32;
+        if result % 100 < 30 {
+            result / 100 * 100
+        } else {
+            result / 100 * 100 + 100
+        }
+    }
+    pub fn get_shipment_cost(&self, card_id: &str) -> u32 {
+        let parts = card_id
+            .split_inclusive("-")
+            .map(str::to_string)
+            .collect::<Vec<String>>();
+        // dbg!(&parts);
+        self.shipment_cost
+            .iter()
+            .find_map(|s| {
+                if s.prefix() == parts[0].as_str() {
+                    Some(s.value())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(self.shipment_for_inventory())
+    }
+    pub fn get_lower_higher_price(&self, raw_price: u32, card_id: &str) -> (u32, u32) {
+        //let raw_price = raw_price as f64;
+        let lower_price = Config::final_price(
+            raw_price,
+            self.shipment_for_inventory(),
+            self.printer_depreciation_per_paper(),
+            self.ink_cost_per_paper(),
+            self.profit_margin,
+        );
+        let higher_price = Config::final_price(
+            raw_price,
+            self.get_shipment_cost(card_id),
+            self.printer_depreciation_per_paper(),
+            self.ink_cost_per_paper(),
+            self.profit_margin,
+        );
+
+        // let lower_price = ((raw_price * 1.05
+        //     + (self.ink_cost_per_paper()
+        //         + self.printer_depreciation_per_paper()
+        //         + self.shipment_for_inventory()) as f64)
+        //     * (1.0 + self.profit_margin)) as u32;
+        // let higher_price = ((raw_price * 1.05
+        //     + (self.ink_cost_per_paper()
+        //         + self.printer_depreciation_per_paper()
+        //         + self.get_shipment_cost(card_id)) as f64)
+        //     * (1.0 + self.profit_margin)) as u32;
+        // let lower_price = if lower_price % 100 < 30 {
+        //     lower_price / 100 * 100
+        // } else {
+        //     lower_price / 100 * 100 + 100
+        // };
+        // let higher_price = if higher_price % 100 < 30 {
+        //     higher_price / 100 * 100
+        // } else {
+        //     higher_price / 100 * 100 + 100
+        // };
+        (lower_price, higher_price)
+    }
 }
 impl Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -289,51 +384,56 @@ fn write_config(config: &Config, path: &str) -> std::io::Result<()> {
     serde_json::to_writer_pretty(writer, config)?;
     Ok(())
 }
-fn calculate_final_price(config: &Config, theme: &ColorfulTheme) {
-    let cost_printer_usage = config.printer_price / config.total_prints;
-    let cost_ink = config.ink_price / config.total_prints;
+fn calculate_final_price(theme: &ColorfulTheme, config: &Config) {
     'outer: loop {
-        let selected_shipment = Select::with_theme(theme)
-            .with_prompt("Shipment")
-            .items(["Almas", "Hamrang", "Inventory", "Back"])
-            .default(0)
-            .interact()
-            .unwrap();
-        let cost_shipment = config
+        let mut shipment_menu = config
             .shipment_cost
             .iter()
-            .find_map(|shipment| match (selected_shipment, shipment) {
-                (0, Shipment::Almas(p)) => Some(*p),
-                (1, Shipment::Hamrang(p)) => Some(*p),
-                (2, Shipment::Inventory(p)) => Some(*p),
-                (3, _) => Some(0),
-                _ => None,
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        shipment_menu.push("Back".into());
+
+        let selected_shipment = shipment_menu[Select::with_theme(theme)
+            .with_prompt("Shipment")
+            .items(&shipment_menu)
+            .default(0)
+            .interact()
+            .unwrap()]
+        .as_str();
+        let shipment_cost = config
+            .shipment_cost
+            .iter()
+            .find_map(|s| {
+                if s.to_string().eq(selected_shipment) {
+                    Some(s.value())
+                } else {
+                    None
+                }
             })
             .unwrap_or_default();
-        if cost_shipment == 0 {
+
+        // this happens when user select Back and so shipment_cost becomes 0
+        if shipment_cost == 0 {
             return;
         }
-        let cost_shipment = Input::<u32>::with_theme(theme)
+        // Here we show default shipment cost so that user can change it manually AGAIN
+        let shipment_cost = Input::<u32>::with_theme(theme)
             .with_prompt("Shipment Price")
-            .default(cost_shipment)
+            .default(shipment_cost)
             .interact()
             .unwrap();
         'inner: loop {
-            let card_raw_price = Input::<u32>::with_theme(theme)
+            let raw_price = Input::<u32>::with_theme(theme)
                 .with_prompt("Card Raw Price")
                 .interact_text()
                 .unwrap_or_default();
-
-            // println!(
-            //     "\nCost Printer Usage: {}",
-            //     cost_printer_usage.to_string().cyan()
-            // );
-            // println!("Cost Ink: {}", cost_ink.to_string().cyan());
-            // println!("Cost Shipment: {}", cost_shipment.to_string().cyan());
-            // println!("Margin: {}", 1.0 + config.profit_margin);
-            let final_price = ((card_raw_price as f64 * 1.05)
-                + (cost_printer_usage + cost_ink + cost_shipment) as f64)
-                * (1.0 + config.profit_margin);
+            let final_price = Config::final_price(
+                raw_price,
+                shipment_cost,
+                config.printer_depreciation_per_paper(),
+                config.ink_cost_per_paper(),
+                config.profit_margin,
+            );
 
             let mut table = Table::new();
 
@@ -367,60 +467,23 @@ fn read_raw_prices() -> std::io::Result<HashMap<String, u32>> {
     let hm: HashMap<String, u32> = serde_json::from_reader(buffer)?;
     Ok(hm)
 }
-fn get_prices_from_raw_prices(config: &Config) -> HashMap<String, Vec<u32>> {
-    let raw_prices = read_raw_prices().unwrap();
+fn get_prices_from_raw_prices(
+    config: &Config,
+    raw_prices: &HashMap<String, u32>,
+) -> HashMap<String, Vec<u32>> {
+    // let raw_prices = read_raw_prices().unwrap();
 
-    let shipment_for_inventory = config
-        .shipment_cost
-        .iter()
-        .find_map(|sh| {
-            if sh.prefix() == "" {
-                Some(sh.value())
-            } else {
-                None
-            }
-        })
-        .unwrap();
     let result = raw_prices
         .iter()
         .map(|(card_code, raw_price)| {
-            let prefix = &card_code[0..=card_code.find(|c| c == '-').unwrap()];
-            let shipment = config
-                .shipment_cost
-                .iter()
-                .find(|sh| sh.prefix().as_str() == prefix);
-
-            let shipment_price = if let Some(sh) = shipment {
-                sh.value()
-            } else {
-                shipment_for_inventory
-            };
-            let cost_printer_usage = config.printer_price / config.total_prints;
-            let cost_ink = config.ink_price / config.total_prints;
-
-            let lower_price = ((*raw_price as f64 * 1.05
-                + (cost_ink + cost_printer_usage + shipment_for_inventory) as f64)
-                * (1.0 + config.profit_margin)) as u32;
-            let higher_price = ((*raw_price as f64 * 1.05
-                + (cost_ink + cost_printer_usage + shipment_price) as f64)
-                * (1.0 + config.profit_margin)) as u32;
-            let lower_price = if lower_price % 100 < 30 {
-                lower_price / 100 * 100
-            } else {
-                lower_price / 100 * 100 + 100
-            };
-            let higher_price = if higher_price % 100 < 30 {
-                higher_price / 100 * 100
-            } else {
-                higher_price / 100 * 100 + 100
-            };
+            let result = config.get_lower_higher_price(*raw_price, card_code);
 
             (
-                card_code.clone(),
-                if lower_price == higher_price {
-                    vec![lower_price]
+                card_code.to_owned(),
+                if result.0 != result.1 {
+                    vec![result.0, result.1]
                 } else {
-                    vec![lower_price, higher_price]
+                    vec![result.0]
                 },
             )
         })
@@ -613,9 +676,11 @@ fn get_parsi_date(theme: &ColorfulTheme) -> parsidate::ParsiDate {
 }
 
 fn show_orders(theme: &ColorfulTheme) {
-   let Some(date_range) = DateRange::new_from_ui(theme) else {return};
-   show_orders_table(date_range.start, date_range.end);
- }
+    let Some(date_range) = DateRange::new_from_ui(theme) else {
+        return;
+    };
+    show_orders_table(date_range.start, date_range.end);
+}
 fn show_orders_for_specific_card(theme: &ColorfulTheme) {}
 fn show_orders_table(start: NaiveDate, end: NaiveDate) {
     println!("{}-{}", start, end);
@@ -646,7 +711,18 @@ fn show_orders_table(start: NaiveDate, end: NaiveDate) {
     //let orders: Vec<Order> = orders.map(|e| e.unwrap()).collect();
     //let table = create_ui_table_from_all_orders(&orders);
     let mut table = Table::new();
-    table.set_header(["Id","Card","Count","Raw Price","Card Cost","Profit","Design","Discount","Paid","When"]);
+    table.set_header([
+        "Id",
+        "Card",
+        "Count",
+        "Raw Price",
+        "Card Cost",
+        "Profit",
+        "Design",
+        "Discount",
+        "Paid",
+        "When",
+    ]);
 
     let mut total_profit = 0u32;
     let mut total_initial = 0u32;
@@ -664,7 +740,10 @@ fn show_orders_table(start: NaiveDate, end: NaiveDate) {
         }
     }
     println!("{}", table);
-    println!("{}\n\n","Card Cost + Profit = Card Final Price".red().bold());
+    println!(
+        "{}\n\n",
+        "Card Cost + Profit = Card Final Price".red().bold()
+    );
     println!(
         "{:>20} {}",
         "Card/Ink/Printer:".yellow(),
@@ -956,7 +1035,7 @@ fn balance_report(theme: &ColorfulTheme) {
         }
     }
 }
-fn create_auto_price_excel(config: &Config) {
+fn create_auto_price_excel(config: &Config, raw_prices: &HashMap<String, u32>) {
     let tmp = Builder::new()
         .prefix("auto_price_")
         .suffix(".xlsx")
@@ -964,11 +1043,11 @@ fn create_auto_price_excel(config: &Config) {
         .expect("Can not create Excel temp file");
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
-    let auto_prices = get_prices_from_raw_prices(config);
+    let auto_prices = get_prices_from_raw_prices(config, raw_prices);
     for (row, (card_id, prices)) in auto_prices.iter().enumerate() {
         worksheet.write(row as u32, 0, card_id);
         worksheet.write(row as u32, 1, prices[0]);
-        worksheet.write(row as u32, 2, if prices.len()>1 {prices[1]} else {0});
+        worksheet.write(row as u32, 2, if prices.len() > 1 { prices[1] } else { 0 });
     }
     workbook.save(tmp.path());
     let (_, p) = tmp.keep().unwrap();
@@ -1182,6 +1261,7 @@ fn manage_prices(
 ) {
     let menu_items = [
         "Modify Raw Prices",
+        "Calculate Final Price",
         "Show Card Price",
         "Generate Raw->Final Excel",
         "Back",
@@ -1195,8 +1275,9 @@ fn manage_prices(
             .unwrap()
         {
             0 => manage_raw_prices(theme, raw_prices),
-            1 => show_card_pice(theme, prices),
-            2 => create_auto_price_excel(config),
+            1 => calculate_final_price(theme, config),
+            2 => show_card_pice(theme, prices),
+            2 => create_auto_price_excel(config, raw_prices),
             _ => break,
         }
     }
@@ -1228,7 +1309,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut raw_prices = read_raw_prices()?;
-    let mut prices = get_prices_from_raw_prices(&config);
+    let mut prices = get_prices_from_raw_prices(&config, &raw_prices);
 
     // Some cards have extra cost this function fix the auto-price-from-raw-price
     fix_cards_with_photo(&mut prices);
