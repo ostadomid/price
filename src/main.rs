@@ -1025,7 +1025,7 @@ fn create_auto_price_excel(config: &Config) {
     for (row, (card_id, prices)) in auto_prices.iter().enumerate() {
         worksheet.write(row as u32, 0, card_id);
         worksheet.write(row as u32, 1, prices[0]);
-        worksheet.write(row as u32, 2, prices[1]);
+        worksheet.write(row as u32, 2, if prices.len()>1 {prices[1]} else {0});
     }
     workbook.save(tmp.path());
     let (_, p) = tmp.keep().unwrap();
