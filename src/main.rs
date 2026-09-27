@@ -1050,6 +1050,7 @@ fn create_auto_price_excel(config: &Config, raw_prices: &BTreeMap<String, u32>) 
         worksheet.write(row as u32, 2, if prices.len() > 1 { prices[1] } else { 0 });
     }
     workbook.save(tmp.path());
+    println!("File created at {:?}",tmp.path());
     let (_, p) = tmp.keep().unwrap();
     open::that(&p);
 }
@@ -1279,7 +1280,7 @@ fn manage_prices(
             0 => manage_raw_prices(theme,config, raw_prices,prices),
             1 => calculate_final_price(theme, config),
             2 => show_card_pice(theme, prices),
-            2 => create_auto_price_excel(config, raw_prices),
+            3 => create_auto_price_excel(config, raw_prices),
             _ => break,
         }
     }
