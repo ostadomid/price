@@ -35,4 +35,15 @@ pub mod tests {
 
         Ok(())
     }
+    #[test]
+    pub fn two(){
+        let mut b = std::collections::BTreeMap::new();
+        b.insert("M-339", 4200);
+        b.insert("AL-333", 8500);
+        b.insert("H-1400", 5500);
+        let x = b.entry("al").or_default();
+        for k in b.keys(){
+            println!("{}",k);
+        }
+    }
 }
