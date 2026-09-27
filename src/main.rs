@@ -7,14 +7,7 @@ mod report;
 mod sql;
 mod ui;
 use std::{
-    collections::HashMap,
-    env,
-    error::Error,
-    fmt::Display,
-    fs::File,
-    io::{BufReader, BufWriter},
-    os::raw,
-    sync::{LazyLock, Mutex, OnceLock},
+    collections::{BTreeMap, HashMap}, env, error::Error, fmt::Display, fs::File, io::{BufReader, BufWriter, Write}, os::raw, sync::{LazyLock, Mutex, OnceLock},
 };
 
 use chrono::NaiveDate;
@@ -242,7 +235,7 @@ impl Order {
         config: &Config,
         theme: &ColorfulTheme,
         prices: &HashMap<String, Vec<u32>>,
-        raw_prices: &HashMap<String, u32>,
+        raw_prices: &BTreeMap<String, u32>,
     ) -> Self {
         let cost_printer_usage = config.printer_price / config.total_prints;
         let cost_ink = config.ink_price / config.total_prints;
@@ -461,16 +454,23 @@ fn read_prices() -> std::io::Result<HashMap<String, Vec<u32>>> {
     let hm: HashMap<String, Vec<u32>> = serde_json::from_reader(buffer)?;
     Ok(hm)
 }
-fn read_raw_prices() -> std::io::Result<HashMap<String, u32>> {
+fn read_raw_prices() -> std::io::Result<BTreeMap<String, u32>> {
     let file = File::open("./raw-prices.json")?;
     let mut buffer = BufReader::new(file);
-    let hm: HashMap<String, u32> = serde_json::from_reader(buffer)?;
+    let hm: BTreeMap<String, u32> = serde_json::from_reader(buffer)?;
     Ok(hm)
+}
+fn write_raw_prices(raw_prices:&BTreeMap<String,u32>)->std::io::Result<()>{
+    let file = File::create("./raw-prices.json")?;
+    let mut buffer = BufWriter::new(file);
+    serde_json::to_writer_pretty(buffer, raw_prices)?;
+
+    Ok(())
 }
 fn get_prices_from_raw_prices(
     config: &Config,
-    raw_prices: &HashMap<String, u32>,
-) -> HashMap<String, Vec<u32>> {
+    raw_prices: &BTreeMap<String, u32>,
+) -> HashMap <String, Vec<u32>> {
     // let raw_prices = read_raw_prices().unwrap();
 
     let result = raw_prices
@@ -781,7 +781,7 @@ fn add_new_order(
     config: &Config,
     theme: &ColorfulTheme,
     prices: &HashMap<String, Vec<u32>>,
-    raw_prices: &HashMap<String, u32>,
+    raw_prices: &BTreeMap<String, u32>,
 ) {
     let new_order = Order::new_from_user(config, theme, prices, raw_prices);
 
@@ -822,7 +822,7 @@ fn manage_orders(
     config: &Config,
     theme: &ColorfulTheme,
     prices: &HashMap<String, Vec<u32>>,
-    raw_prices: &HashMap<String, u32>,
+    raw_prices: &BTreeMap<String, u32>,
 ) {
     let menu_items = ["Add New Order", "Show Orders", "Back"];
     loop {
@@ -1035,7 +1035,7 @@ fn balance_report(theme: &ColorfulTheme) {
         }
     }
 }
-fn create_auto_price_excel(config: &Config, raw_prices: &HashMap<String, u32>) {
+fn create_auto_price_excel(config: &Config, raw_prices: &BTreeMap<String, u32>) {
     let tmp = Builder::new()
         .prefix("auto_price_")
         .suffix(".xlsx")
@@ -1208,7 +1208,7 @@ fn manage_categories(theme: &ColorfulTheme) {
         }
     }
 }
-fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32>) {
+fn manage_raw_prices(theme: &ColorfulTheme,config:&Config, raw_prices: &mut BTreeMap<String, u32>, prices:&mut HashMap<String,Vec<u32>>) {
     let menu_items = ["Add / Edit Price", "Back"];
 
     loop {
@@ -1246,6 +1246,8 @@ fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32
                     .interact()
                     .unwrap();
                 *current_price = new_price;
+                *prices = get_prices_from_raw_prices(config, raw_prices);
+                write_raw_prices(raw_prices).unwrap();
                 println!("{}", "Done!".green());
             }
             _ => break,
@@ -1256,8 +1258,8 @@ fn manage_raw_prices(theme: &ColorfulTheme, raw_prices: &mut HashMap<String, u32
 fn manage_prices(
     theme: &ColorfulTheme,
     config: &Config,
-    raw_prices: &mut HashMap<String, u32>,
-    prices: &HashMap<String, Vec<u32>>,
+    raw_prices: &mut BTreeMap<String, u32>,
+    prices: &mut HashMap<String, Vec<u32>>,
 ) {
     let menu_items = [
         "Modify Raw Prices",
@@ -1274,7 +1276,7 @@ fn manage_prices(
             .interact()
             .unwrap()
         {
-            0 => manage_raw_prices(theme, raw_prices),
+            0 => manage_raw_prices(theme,config, raw_prices,prices),
             1 => calculate_final_price(theme, config),
             2 => show_card_pice(theme, prices),
             2 => create_auto_price_excel(config, raw_prices),
@@ -1297,6 +1299,7 @@ fn manage_settings(theme: &ColorfulTheme) {
         }
     }
 }
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     init_db()?;
@@ -1327,7 +1330,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         {
             0 => manage_orders(&config, &theme, &prices, &raw_prices),
             1 => manage_expenses(&theme),
-            2 => manage_prices(&theme, &config, &mut raw_prices, &prices),
+            2 => manage_prices(&theme, &config, &mut raw_prices, &mut prices),
             3 => balance_report(&theme),
             4 => manage_settings(&theme),
             _ => break,
