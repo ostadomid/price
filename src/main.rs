@@ -1061,7 +1061,7 @@ fn fix_cards_with_photo(prices: &mut HashMap<String, Vec<u32>>) {
         }
     };
     // prices.entry("AT-000".to_owned()).and_modify(|f| f[0] = -4300);
-    for card_id in vec!["AL-430", "AL-460", "AL-463", "AL-479"]
+    for card_id in vec!["AL-430", "AL-460", "AL-463", "AL-479","C-Color"]
         .iter()
         .map(|e| e.to_string())
     {
